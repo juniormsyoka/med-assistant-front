@@ -1,19 +1,30 @@
+// src/models/LogEntry.ts
+
 export type LogStatus = 
-  | 'taken'        // dose taken on time
-  | 'missed'       // dose was not taken at all
-  | 'snoozed'      // remind me later
-  | 'skipped'      // intentionally skipped
-  | 'late'         // taken, but after scheduled time
-  | 'rescheduled'; // dose time moved
+  | 'taken'
+  | 'missed'
+  | 'snoozed'
+  | 'skipped'
+  | 'late'
+  | 'rescheduled'
+  | 'active'
+  | 'paused'
+  | 'refilled'
+  | 'attended'
+  | 'missedAttendance';
 
 export interface LogEntry {
-  id?: number;
+  id?: number;                 // local ID
+  server_id?: string;          // ID from Supabase once synced
+  synced_at?: string | null;   // when it was last synced to Supabase
   medicationId: number;
   medicationName: string;
   status: LogStatus;
-  scheduledTime: string;  // ISO string
-  actualTime?: string;    // ISO string (null/undefined for missed/skipped)
-  createdAt?: string;     // ISO string
+  scheduledTime: string;       // ISO string
+  actualTime?: string;
+  dosage?: string;
+  snoozeMinutes?: number;
+  createdAt?: string;          // ISO string
 }
 
-export type CreateLogEntry = Omit<LogEntry, 'id' | 'createdAt'>;
+export type CreateLogEntry = Omit<LogEntry, 'id' | 'createdAt' | 'server_id' | 'synced_at'>;

@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "med-reminder",
+    "name": "Med-Assistant",
     "slug": "med-reminder",
-    "version": "1.0.6",
+    "version": "1.1.5",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -10,15 +10,17 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "cover",
-      "backgroundColor": "#9888FC"
+      "backgroundColor": "#0FDBD1"
     },
     "ios": {
       "supportsTablet": true
     },
     "android": {
-      "permissions":["INTERNET"],
+      "permissions": [
+        "INTERNET"
+      ],
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/pulse.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
@@ -26,7 +28,7 @@
       "package": "com.msyoka.medreminder"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/Med.png"
     },
     "updates": {
       "enabled": true,
@@ -36,6 +38,10 @@
       "eas": {
         "projectId": "e4fac554-ada6-439e-b190-808c8d8ee2cb"
       }
-    }
+    },
+    "scheme": "medassisant",
+    "plugins": [
+      "expo-font"
+    ]
   }
 }

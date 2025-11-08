@@ -6,17 +6,21 @@ export interface UserPreferences {
   theme: 'light' | 'dark' | 'system';
   language: string;
   fontScale: number;
+  themeName?: string;
 
   inAppAlertsEnabled: boolean,    
   soundEnabled: boolean,          
-  badgeEnabled: boolean,          
+  badgeEnabled: boolean,    
+    autoSave?: boolean;          // Add this
+  cloudBackup?: boolean;         
 }
 
 export interface UserProfile {
-  id: number;
+  id: string;
   name: string;
   email?: string;
   phone?: string;
+  profilePicture?: string; // Add this line
   preferences: UserPreferences;
   createdAt: string;
   updatedAt: string;
@@ -31,6 +35,8 @@ export const defaultPreferences: UserPreferences = {
   language: 'en',
   fontScale:2,
 
+    autoSave: false,     
+  cloudBackup: false,
   //added later on
   inAppAlertsEnabled: true,    // Controls shouldShowAlert
   soundEnabled: true,          // Controls shouldPlaySound  

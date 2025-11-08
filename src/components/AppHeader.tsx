@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons'; // Assuming you're using Expo ico
 
 interface AppHeaderProps {
   title: string;
+  subtitle?: string;
   showBack?: boolean;
   onBackPress?: () => void;
   rightAction?: {

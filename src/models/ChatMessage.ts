@@ -17,7 +17,8 @@ export interface ChatMessage {
   timestamp: Date;
 
   // allow any of the MessageType values
-  type?: MessageType;
+ type?: MessageType;
+   //type?: 'text' | 'scan' | 'scan_result' | 'scan_error' | 'system';
   suggestions?: string[]; // for quick-reply buttons
   metadata?: {
     medicationId?: number;

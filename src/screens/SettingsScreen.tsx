@@ -1,45 +1,124 @@
-import React, { useState, useEffect } from 'react';
+// screens/SettingsScreen.tsx - Add these updates
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   ScrollView,
-  Switch,
   StyleSheet,
-  Text,
-  TouchableOpacity,
   Alert,
+  Dimensions,
+  Text,
 } from 'react-native';
 import { useTheme } from '@react-navigation/native';
-import AppHeader from '../components/AppHeader';
-import PrimaryButton from '../components/PrimaryButton';
-import TextInputField from '../components/TextInputField';
+import { useAppTheme } from '../contexts/ThemeContext';
+import { Themes } from '../themes/theme';
 import { settingsService } from '../Services/Settings';
 import { UserPreferences, UserProfile } from '../models/User';
-import { useAppTheme } from '../../App';
+import ProfileSection from '../components/settings/Profile';
+import NotificationsSection from '../components/settings/NotificationsSection';
+import ThemeSelector from '../components/settings/ThemeSelector';
+import SaveButton from '../components/settings/SaveButton';
+import { Ionicons } from '@expo/vector-icons';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const SettingsScreen = ({ navigation }: any) => {
   const [profile, setProfile] = useState<Partial<UserProfile>>({});
   const [preferences, setPreferences] = useState<Partial<UserPreferences>>({});
   const [loading, setLoading] = useState(false);
+  const [initialLoad, setInitialLoad] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<{ isOnline: boolean; isAuthenticated: boolean }>({ 
+    isOnline: false, 
+    isAuthenticated: false 
+  });
 
-  const { theme, setTheme } = useAppTheme();
-  const { colors } = useTheme(); // ✅ Navigation theme hook
+  const { setTheme } = useAppTheme();
+  const { colors } = useTheme();
 
-  useEffect(() => {
-    loadSettings();
-  }, []);
-
-  const loadSettings = async () => {
+  const loadSettings = useCallback(async () => {
     try {
+      console.log('Loading settings...');
+      
+      // Sync with Supabase first if available
+      await settingsService.syncWithSupabase();
+      
       const userProfile = await settingsService.initialize();
+      
+      console.log('Loaded profile:', {
+        name: userProfile.name,
+        hasProfilePicture: !!userProfile.profilePicture,
+        profilePicture: userProfile.profilePicture
+      });
+      
+      // Set the complete profile including profilePicture
       setProfile({
         name: userProfile.name,
         email: userProfile.email,
         phone: userProfile.phone,
+        profilePicture: userProfile.profilePicture,
       });
+      
       setPreferences(userProfile.preferences);
+
+      // Get sync status
+      const status = await settingsService.getSyncStatus();
+      setSyncStatus(status);
+
+      // Apply the saved theme
+      if (userProfile.preferences?.theme) {
+        const savedTheme = Themes.find(
+          t => t.name === userProfile.preferences.theme
+        );
+        if (savedTheme) {
+          setTheme(savedTheme);
+        }
+      }
     } catch (error) {
       console.error('Error loading settings:', error);
       Alert.alert('Error', 'Failed to load settings');
+    } finally {
+      setInitialLoad(false);
+    }
+  }, [setTheme]);
+
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
+
+  // Sync status component
+  const SyncStatusIndicator = () => (
+    <View style={[styles.syncStatus, { backgroundColor: colors.card }]}>
+      <Ionicons 
+        name={syncStatus.isOnline ? "cloud-done" : "cloud-offline"} 
+        size={16} 
+        color={syncStatus.isOnline ? "#4CAF50" : "#FF6B6B"} 
+      />
+      <Text style={[styles.syncText, { color: colors.text }]}>
+        {syncStatus.isAuthenticated 
+          ? (syncStatus.isOnline ? 'Synced with cloud' : 'Offline mode') 
+          : 'Local storage only'
+        }
+      </Text>
+    </View>
+  );
+
+  const updatePreference = (key: keyof UserPreferences, value: any) => {
+    console.log(`Updating preference: ${key} = ${value}`);
+    
+    // Update the preferences state
+    setPreferences(prev => ({ ...prev, [key]: value }));
+    
+    // Immediately apply theme changes when theme is selected
+    if (key === 'theme') {
+      const selectedTheme = Themes.find(t => t.name === value);
+      if (selectedTheme) {
+        console.log('Immediately applying theme:', selectedTheme.name);
+        setTheme(selectedTheme);
+        
+        // Also save the theme preference immediately
+        settingsService.updatePreferences({ theme: value }).catch(error => {
+          console.error('Error saving theme preference:', error);
+        });
+      }
     }
   };
 
@@ -49,9 +128,9 @@ const SettingsScreen = ({ navigation }: any) => {
       await settingsService.updateProfile(profile);
       await settingsService.updatePreferences(preferences);
 
-      if (preferences.theme) {
-        setTheme(preferences.theme as any); // apply immediately
-      }
+      // Update sync status after save
+      const status = await settingsService.getSyncStatus();
+      setSyncStatus(status);
 
       Alert.alert('Success', 'Settings saved successfully');
     } catch (error) {
@@ -61,230 +140,73 @@ const SettingsScreen = ({ navigation }: any) => {
     setLoading(false);
   };
 
-  const updatePreference = (key: keyof UserPreferences, value: any) => {
-    setPreferences(prev => ({ ...prev, [key]: value }));
-  };
+  if (initialLoad) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={styles.loadingContainer}>
+          <Text style={{ color: colors.text }}>Loading...</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <AppHeader
-        title="Settings"
-        showBack
-        onBackPress={() => navigation.goBack()}
-      />
-
-      <ScrollView style={styles.content}>
-        {/* Profile Section */}
-        <View style={[styles.section, { backgroundColor: colors.card }]}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Profile
-          </Text>
-          <TextInputField
-            label="Name"
-            placeholder="Your name"
-            value={profile.name || ''}
-            onChangeText={text =>
-              setProfile(prev => ({ ...prev, name: text }))
-            }
-          />
-          <TextInputField
-            label="Email"
-            placeholder="your.email@example.com"
-            value={profile.email || ''}
-            onChangeText={text =>
-              setProfile(prev => ({ ...prev, email: text }))
-            }
-            keyboardType="email-address"
-          />
-          <TextInputField
-            label="Phone"
-            placeholder="+1 (555) 123-4567"
-            value={profile.phone || ''}
-            onChangeText={text =>
-              setProfile(prev => ({ ...prev, phone: text }))
-            }
-            keyboardType="phone-pad"
-          />
-        </View>
-
-        {/* Notification Preferences */}
-        <View style={[styles.section, { backgroundColor: colors.card }]}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Notifications
-          </Text>
-
-          <View
-            style={[
-              styles.preferenceRow,
-              { borderBottomColor: colors.border },
-            ]}
-          >
-            <View style={styles.preferenceInfo}>
-              <Text style={[styles.preferenceLabel, { color: colors.text }]}>
-                Vibration
-              </Text>
-              <Text
-                style={[
-                  styles.preferenceDescription,
-                  { color: colors.text },
-                ]}
-              >
-                Enable vibration with notifications
-              </Text>
-            </View>
-            <Switch
-              value={preferences.vibrationEnabled ?? true}
-              onValueChange={value =>
-                updatePreference('vibrationEnabled', value)
-              }
-              trackColor={{
-                false: colors.border,
-                true: colors.primary,
-              }}
-              thumbColor={
-                preferences.vibrationEnabled ? colors.primary : colors.border
-              }
-            />
-          </View>
-
-          <View
-            style={[
-              styles.preferenceRow,
-              { borderBottomColor: colors.border },
-            ]}
-          >
-            <View style={styles.preferenceInfo}>
-              <Text style={[styles.preferenceLabel, { color: colors.text }]}>
-                Daily Summary
-              </Text>
-              <Text
-                style={[
-                  styles.preferenceDescription,
-                  { color: colors.text },
-                ]}
-              >
-                Receive daily medication summary
-              </Text>
-            </View>
-            <Switch
-              value={preferences.enableDailySummary ?? true}
-              onValueChange={value =>
-                updatePreference('enableDailySummary', value)
-              }
-              trackColor={{
-                false: colors.border,
-                true: colors.primary,
-              }}
-              thumbColor={
-                preferences.enableDailySummary
-                  ? colors.primary
-                  : colors.border
-              }
-            />
-          </View>
-        </View>
-
-        {/* Theme Preference */}
-        <View style={[styles.section, { backgroundColor: colors.card }]}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>
-            Appearance
-          </Text>
-
-          <View style={styles.preferenceRow}>
-            <View style={styles.preferenceInfo}>
-              <Text style={[styles.preferenceLabel, { color: colors.text }]}>
-                Theme
-              </Text>
-              <Text
-                style={[
-                  styles.preferenceDescription,
-                  { color: colors.text },
-                ]}
-              >
-                Choose your app appearance
-              </Text>
-            </View>
-            <View style={styles.themeOptions}>
-              {['light', 'dark', 'system'].map(option => {
-                const isSelected = preferences.theme === option;
-                return (
-                  <TouchableOpacity
-                    key={option}
-                    style={[
-                      styles.themeOption,
-                      {
-                        backgroundColor: isSelected
-                          ? colors.primary
-                          : colors.background,
-                        borderColor: isSelected
-                          ? colors.primary
-                          : colors.border,
-                      },
-                    ]}
-                    onPress={() => {
-                      updatePreference('theme', option);
-                      setTheme(option as any); // apply immediately
-                    }}
-                  >
-                    <Text
-                      style={[
-                        styles.themeOptionText,
-                        {
-                          color: isSelected ? '#FFF' : colors.text,
-                          fontWeight: isSelected ? '600' : '400',
-                        },
-                      ]}
-                    >
-                      {option.charAt(0).toUpperCase() + option.slice(1)}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-        </View>
-
-        {/* Save Button */}
-        <PrimaryButton
-          title="Save Settings"
-          onPress={handleSave}
-          loading={loading}
-          style={styles.saveButton}
+      <SyncStatusIndicator />
+      
+      <ScrollView 
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        <ProfileSection profile={profile} setProfile={setProfile} />
+        <NotificationsSection preferences={preferences} updatePreference={updatePreference} />
+        <ThemeSelector 
+          preferences={preferences} 
+          updatePreference={updatePreference} 
         />
+        
+        {/* Spacer for floating button */}
+        <View style={styles.bottomSpacer} />
       </ScrollView>
+
+      <SaveButton onPress={handleSave} loading={loading} />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  content: { flex: 1, padding: 16 },
-  section: {
-    padding: 20,
-    borderRadius: 12,
-    marginBottom: 20,
-    elevation: 1,
+  container: { 
+    flex: 1,
+    marginTop: 30,
+    marginBottom: 70
   },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 16 },
-  preferenceRow: {
+  content: { 
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 100,
+  },
+  syncStatus: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+    justifyContent: 'center',
+    padding: 12,
+    marginHorizontal: 20,
+    marginTop: 10,
+    borderRadius: 8,
+    gap: 8,
   },
-  preferenceInfo: { flex: 1, marginRight: 16 },
-  preferenceLabel: { fontSize: 16, fontWeight: '600', marginBottom: 4 },
-  preferenceDescription: { fontSize: 12 },
-  saveButton: { marginBottom: 40 },
-  themeOptions: { flexDirection: 'row', gap: 8 },
-  themeOption: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
+  syncText: {
+    fontSize: 14,
+    fontWeight: '500',
   },
-  themeOptionText: { fontSize: 12 },
+  bottomSpacer: {
+    height: 20,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 });
 
 export default SettingsScreen;

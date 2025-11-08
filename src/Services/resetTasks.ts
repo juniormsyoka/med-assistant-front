@@ -14,3 +14,4 @@ TaskManager.defineTask(RESET_TASK, async () => {
     return BackgroundFetch.BackgroundFetchResult.Failed;
   }
 });
+
