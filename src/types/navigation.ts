@@ -33,3 +33,22 @@ export type AuthStackParamList = {
     hospitalName: string;
   };
 };
+
+
+export type DoctorStackParamList = {
+  DoctorDashboard: undefined;
+  PatientDetail: { patientId: string };
+  ChatRoom: {
+    mode: 'doctor';
+    adapter: string;
+    conversationId: string;
+    userRole: string;
+    userId: string;
+    patientId: string;
+    patientName: string;
+    assignedDoctorId?: string;
+  };
+  AppointmentSchedule: undefined;
+  DoctorChatList: undefined;
+  AddAppointment: undefined;
+};

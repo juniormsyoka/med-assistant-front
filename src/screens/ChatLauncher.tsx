@@ -7,6 +7,8 @@ import { getPatientDoctor } from '@/Services/patientService';
 import { ActivityIndicator } from 'react-native-paper';
 import { chatService } from '@/Services/chatService'; // ✅ import chatService
 
+import { useTheme } from '@react-navigation/native';
+
 // Define the route params type
 type ChatLauncherRouteParams = {
   doctorAssigned?: boolean;
@@ -22,6 +24,8 @@ const ChatLauncher: React.FC = () => {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [assignedDoctor, setAssignedDoctor] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const { colors } = useTheme();
+
 
   useEffect(() => {
     loadUserData();
@@ -67,7 +71,7 @@ const ChatLauncher: React.FC = () => {
   };
 
   // ✅ Use chatService to get real conversation UUID
-  const handleDoctorChatDirect = async (doctorId: string) => {
+  /*const handleDoctorChatDirect = async (doctorId: string) => {
     if (!userProfile?.id) return;
 
     try {
@@ -88,7 +92,43 @@ const ChatLauncher: React.FC = () => {
       console.error('Failed to get conversation UUID:', error);
       Alert.alert('Error', 'Unable to open chat. Try again later.');
     }
-  };
+  }; */
+
+const handleDoctorChatDirect = async (doctorId: string) => {
+  if (!userProfile?.id) return;
+
+  try {
+    console.log('🚀 Starting DOCTOR chat with:', {
+      patientId: userProfile.id,
+      doctorId: doctorId
+    });
+
+    const conversationId = await chatService.getOrCreateConversation(
+      userProfile.id,
+      doctorId
+    );
+
+    console.log('🎯 Navigating to DOCTOR ChatRoom with:', {
+      mode: 'doctor',
+      conversationId,
+      userRole: 'patient',
+      userId: userProfile.id,
+      assignedDoctorId: doctorId
+    });
+
+    navigation.navigate('ChatRoom', {
+      mode: 'doctor', // ← THIS MUST BE 'doctor'
+      adapter: 'DoctorAdapter',
+      conversationId,
+      userRole: 'patient',
+      userId: userProfile.id,
+      assignedDoctorId: doctorId,
+    });
+  } catch (error) {
+    console.error('Failed to get conversation UUID:', error);
+    Alert.alert('Error', 'Unable to open doctor chat. Try again later.');
+  }
+};
 
   const handleDoctorChat = async () => {
     if (!assignedDoctor?.doctor_id) {
@@ -118,16 +158,16 @@ const ChatLauncher: React.FC = () => {
 
   if (loading) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color="#4361EE" />
-        <Text style={styles.loadingText}>Loading...</Text>
+        <Text style={[styles.loadingText, { color: colors.text }]}>Loading...</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.header}>Choose Chat Type</Text>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <Text style={[styles.header, { color: colors.text }]}>Choose Chat Type</Text>
 
       <TouchableOpacity style={[styles.option, { backgroundColor: '#4361EE' }]} onPress={handleAIChat}>
         <Ionicons name="chatbubbles" size={28} color="#fff" />

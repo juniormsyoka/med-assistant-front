@@ -1,6 +1,6 @@
 // stores/messagingStore.ts
 import { create } from 'zustand';
-import { ChatMessage } from '../models/ChatMessage';
+import { ChatMessage, filterMessagesByConversation } from '../models/ChatMessage';
 import { chatService } from '../Services/chatService';
 
 interface MessagingState {
@@ -19,6 +19,7 @@ interface MessagingState {
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   clearMessages: () => void;
+  clearConversationMessages: (conversationId: string) => void; // ✅ ADDED: Clear specific conversation
 
   // Conversations
   setConversations: (conversations: any[]) => void;
@@ -28,6 +29,9 @@ interface MessagingState {
   loadMessages: (conversationId: string, userId: string) => Promise<void>;
   sendMessage: (conversationId: string, userId: string, text: string) => Promise<void>;
   subscribeToMessages: (conversationId: string, userId: string) => () => void;
+
+  // ✅ ADDED: Get messages for specific conversation
+  getMessagesForConversation: (conversationId: string) => ChatMessage[];
 }
 
 export const useMessagingStore = create<MessagingState>((set, get) => ({
@@ -39,22 +43,33 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
   unsubscribe: null,
 
   setMessages: (messages) => set({ messages }),
+  
   addMessage: (message) => set((state) => ({
     messages: [...state.messages, message],
   })),
+  
   updateMessage: (messageId, updates) =>
     set((state) => ({
       messages: state.messages.map((msg) =>
         msg.id === messageId ? { ...msg, ...updates } : msg
       ),
     })),
+    
   removeMessage: (messageId) =>
     set((state) => ({
       messages: state.messages.filter((msg) => msg.id !== messageId),
     })),
+    
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
+  
   clearMessages: () => set({ messages: [] }),
+  
+  // ✅ ADDED: Clear only messages from specific conversation
+  clearConversationMessages: (conversationId: string) =>
+    set((state) => ({
+      messages: state.messages.filter((msg) => msg.conversationId !== conversationId),
+    })),
 
   setConversations: (conversations) => set({ conversations }),
 
@@ -73,14 +88,24 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
   },
 
   loadMessages: async (conversationId: string, userId: string) => {
-    const { setLoading, setMessages, setError } = get();
+    const { setLoading, setMessages, setError, clearConversationMessages } = get();
 
     try {
       setLoading(true);
       setError(null);
 
+      // ✅ CLEAR existing messages for this conversation first
+      clearConversationMessages(conversationId);
+
       const messages = await chatService.loadMessages(conversationId, userId);
-      setMessages(messages);
+      
+      // ✅ ADD conversationId to each message
+      const messagesWithConversationId = messages.map(msg => ({
+        ...msg,
+        conversationId: conversationId,
+      }));
+      
+      setMessages(messagesWithConversationId);
       set({ currentConversationId: conversationId });
     } catch (error) {
       console.error('Failed to load messages:', error);
@@ -93,12 +118,13 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
   sendMessage: async (conversationId: string, userId: string, text: string) => {
     const { addMessage, setError } = get();
 
-    // Optimistic message
+    // Optimistic message with conversationId
     const optimisticMsg: ChatMessage = {
       id: `temp-${Date.now()}`,
       text: text,
       isUser: true,
       timestamp: new Date(),
+      conversationId: conversationId, // ✅ ADDED: Include conversationId
     };
     addMessage(optimisticMsg);
 
@@ -127,7 +153,12 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
         if (existingIndex >= 0) {
           updateMessage(get().messages[existingIndex].id, newMessage);
         } else {
-          addMessage(newMessage);
+          // ✅ ADD conversationId to incoming real-time messages
+          const messageWithConversationId = {
+            ...newMessage,
+            conversationId: conversationId,
+          };
+          addMessage(messageWithConversationId);
         }
       }
     );
@@ -137,5 +168,11 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
       unsubscribeFn();
       set({ unsubscribe: null });
     };
+  },
+
+  // ✅ ADDED: Get filtered messages for specific conversation
+  getMessagesForConversation: (conversationId: string) => {
+    const { messages } = get();
+    return filterMessagesByConversation(messages, conversationId);
   },
 }));

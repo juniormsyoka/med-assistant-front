@@ -5,7 +5,7 @@ import { signUpUser } from '@/Services/authService';
 //import { StackScreenProps } from '@react-navigation/stack';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { markInvitationUsed } from '@/Services/authService';
-
+import {toast} from '../../Services/toastService';
 
 type RootStackParamList = {
   DoctorSignup: { token: string }; // or { someParam: string }
@@ -33,7 +33,7 @@ export default function DoctorSignupScreen({ route, navigation }: DoctorSignupPr
         .single();
 
       if (error || !data) {
-        Alert.alert('Invalid or expired invite');
+        toast.error('Invalid or expired invite');
       } else {
         setValidInvite(true);
         setEmail(data.email);
@@ -54,10 +54,10 @@ const handleSignUp = async () => {
     });
     
     await markInvitationUsed(token);
-    Alert.alert('Success', 'Account created! Await admin verification.');
+    toast.info('Account created succesfully! Await admin verification.');
     navigation.navigate('Login' as never);
   } catch (err: any) {
-    Alert.alert('Error', err.message);
+    toast.error( err.message);
   }
 };
 

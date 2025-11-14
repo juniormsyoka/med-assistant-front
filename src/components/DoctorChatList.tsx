@@ -14,7 +14,11 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/Services/supabaseClient';
 
+import { useTheme } from '@react-navigation/native';
+
 import { chatService } from '@/Services/chatService';
+
+import { toast } from '@/Services/toastService';
 
 interface Patient {
   id: string;
@@ -31,6 +35,8 @@ const DoctorChatList: React.FC = () => {
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const { colors } = useTheme();
+
 
   useEffect(() => {
     loadPatients();
@@ -89,7 +95,7 @@ const DoctorChatList: React.FC = () => {
     });
 
     // ✅ Step 2: For each patient, fetch their latest message
-    console.log('🔄 [loadPatients] Fetching latest messages for each patient...');
+  //  console.log('🔄 [loadPatients] Fetching latest messages for each patient...');
     const patientList: Patient[] = await Promise.all(
       assignments.map(async (assignment, index) => {
         const patient = assignment.patients?.[0];
@@ -106,7 +112,7 @@ const DoctorChatList: React.FC = () => {
         let patientEmail = patient?.email;
 
         if (!patientName) {
-          console.log(`🔄 [loadPatients] No patient data in relation, fetching directly for ID: ${assignment.patient_id}`);
+    //      console.log(`🔄 [loadPatients] No patient data in relation, fetching directly for ID: ${assignment.patient_id}`);
           const { data: directPatient, error: directError } = await supabase
             .from('users')
             .select('full_name, email')
@@ -156,7 +162,7 @@ const DoctorChatList: React.FC = () => {
 
   } catch (error: any) {
     console.error('💥 [loadPatients] CATCH BLOCK - Full error details:', error);
-    Alert.alert('Error', 'Failed to load patient list');
+    toast.error('Error: Failed to load patient list');
   } finally {
     setLoading(false);
     setRefreshing(false);
@@ -219,12 +225,11 @@ const handlePatientPress = async (patient: Patient) => {
     console.error('Failed to get conversation UUID:', error);
     
     if (error.message?.includes('row-level security')) {
-      Alert.alert(
-        'Configuration Error', 
-        'Chat system is not properly configured. Please contact support.'
+      toast.info(
+        'Configuration Error!! Chat system is not properly configured. Please contact support.'
       );
     } else {
-      Alert.alert('Error', 'Unable to open chat with patient.');
+      toast.info('Error, Unable to open chat with patient.');
     }
   }
 };
@@ -277,9 +282,9 @@ const handlePatientPress = async (patient: Patient) => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Your Patients</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Your Patients</Text>
         <Text style={styles.headerSubtitle}>
           {patients.length} patient{patients.length !== 1 ? 's' : ''}
         </Text>
@@ -288,8 +293,8 @@ const handlePatientPress = async (patient: Patient) => {
       {patients.length === 0 ? (
         <View style={styles.emptyState}>
           <Ionicons name="people-outline" size={64} color="#999" />
-          <Text style={styles.emptyTitle}>No Patients Yet</Text>
-          <Text style={styles.emptyText}>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>No Patients Yet</Text>
+          <Text style={[styles.emptyText, { color: colors.text + '80' }]}>
             Patients assigned to you will appear here for messaging
           </Text>
         </View>
@@ -314,6 +319,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa',
   },
   header: {
+    paddingTop: 20,
     padding: 20,
     backgroundColor: 'white',
     borderBottomWidth: 1,

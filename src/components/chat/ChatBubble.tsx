@@ -1,193 +1,95 @@
-import React, { memo } from 'react';
+import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '@react-navigation/native';
 import { ChatMessage } from '../../models/ChatMessage';
-import { ScanningBubble } from './ScanningBubble';
 
 interface ChatBubbleProps {
   message: ChatMessage;
-  isFirst?: boolean;
+  isFirst: boolean;
+  isStreaming?: boolean;
+  streamingText?: string;
 }
 
-const ChatBubble: React.FC<ChatBubbleProps> = ({ message, isFirst = false }) => {
-  // Early return for scanning state
-  if (message.text === "__scanning__") {
-    return <ScanningBubble />;
-  }
-
-  const isSystemMessage = message.text.includes('📷') || message.text.includes('❌') || message.text.includes('⚠️');
+const ChatBubble: React.FC<ChatBubbleProps> = ({ 
+  message, 
+  isFirst, 
+  isStreaming = false, 
+  streamingText 
+}) => {
+  const { colors } = useTheme();
+  
+  const displayText = isStreaming && streamingText ? streamingText : message.text;
 
   return (
     <View style={[
-      styles.bubbleContainer,
-      message.isUser ? styles.userBubbleContainer : styles.botBubbleContainer,
-      isFirst && styles.firstBubble
+      styles.container,
+      message.isUser ? styles.userContainer : styles.aiContainer
     ]}>
-      
-      {/* Bot Avatar */}
-      {!message.isUser && !isSystemMessage && (
-        <View style={styles.avatar}>
-          <Ionicons name="medical" size={16} color="#FFF" />
-        </View>
-      )}
-
-      {/* System Message Icon */}
-      {isSystemMessage && (
-        <View style={[styles.avatar, styles.systemAvatar]}>
-          <Ionicons 
-            name={getSystemIcon(message.text)} 
-            size={16} 
-            color="#FFF" 
-          />
-        </View>
-      )}
-
       <View style={[
         styles.bubble,
-        message.isUser ? styles.userBubble : styles.botBubble,
-        isSystemMessage && styles.systemBubble
+        message.isUser 
+          ? [styles.userBubble, { backgroundColor: colors.primary }]
+          : [styles.aiBubble, { backgroundColor: colors.card, borderColor: colors.border }]
       ]}>
         <Text style={[
-          message.isUser ? styles.userText : styles.botText,
-          isSystemMessage && styles.systemText
+          styles.text,
+          message.isUser ? styles.userText : { color: colors.text }
         ]}>
-          {message.text}
+          {displayText}
+          {isStreaming && <Text style={styles.streamingCursor}>▊</Text>}
         </Text>
-        
-        <View style={styles.timestampContainer}>
-          {!message.isUser && !isSystemMessage && (
-            <Ionicons name="checkmark-done" size={12} color="#4361EE" style={styles.readIcon} />
-          )}
-          <Text style={[
-            styles.timestamp,
-            message.isUser ? styles.userTimestamp : styles.botTimestamp
-          ]}>
-            {formatTimestamp(message.timestamp)}
-          </Text>
-        </View>
       </View>
-
-      {/* User Avatar */}
-      {message.isUser && (
-        <View style={[styles.avatar, styles.userAvatar]}>
-          <Ionicons name="person" size={16} color="#FFF" />
-        </View>
-      )}
+      
+      {/* Timestamp */}
+      <Text style={[styles.timestamp, { color: colors.text + '80' }]}>
+        {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+      </Text>
     </View>
   );
 };
 
-// Helper functions outside component to prevent recreation
-const getSystemIcon = (text: string): keyof typeof Ionicons.glyphMap => {
-  if (text.includes('📷')) return "camera";
-  if (text.includes('❌')) return "warning";
-  return "alert";
-};
-
-const formatTimestamp = (timestamp: Date): string => {
-  return timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-};
-
-// Memoize with custom comparison function
-const areEqual = (prevProps: ChatBubbleProps, nextProps: ChatBubbleProps): boolean => {
-  return (
-    prevProps.message.id === nextProps.message.id &&
-    prevProps.message.text === nextProps.message.text &&
-    prevProps.message.isUser === nextProps.message.isUser &&
-    prevProps.isFirst === nextProps.isFirst
-    // Note: We're not comparing timestamp changes as they don't affect visual appearance
-  );
-};
-
 const styles = StyleSheet.create({
-  bubbleContainer: {
-    marginVertical: 6,
-    maxWidth: '85%',
-    flexDirection: 'row',
+  container: {
+    marginVertical: 4,
+    paddingHorizontal: 16,
+  },
+  userContainer: {
+    alignSelf: 'flex-end',
     alignItems: 'flex-end',
   },
-  userBubbleContainer: {
-    alignSelf: 'flex-end',
-  },
-  botBubbleContainer: {
+  aiContainer: {
     alignSelf: 'flex-start',
-  },
-  firstBubble: {
-    marginTop: 8,
-  },
-  avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#4361EE',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 8,
-  },
-  userAvatar: {
-    backgroundColor: '#6C757D',
-  },
-  systemAvatar: {
-    backgroundColor: '#FF9800',
+    alignItems: 'flex-start',
   },
   bubble: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-    maxWidth: '100%',
+    maxWidth: '80%',
   },
   userBubble: {
-    backgroundColor: '#4361EE',
-    borderBottomRightRadius: 6,
-    marginLeft: 8,
+    borderBottomRightRadius: 4,
   },
-  botBubble: {
-    backgroundColor: '#FFF',
-    borderBottomLeftRadius: 6,
+  aiBubble: {
+    borderBottomLeftRadius: 4,
     borderWidth: 1,
-    borderColor: '#F0F0F0',
-    marginRight: 8,
   },
-  systemBubble: {
-    backgroundColor: '#FFF8E1',
-    borderColor: '#FFECB3',
+  text: {
+    fontSize: 16,
+    lineHeight: 20,
   },
   userText: {
-    color: '#FFF',
-    fontSize: 16,
-    lineHeight: 22,
-  },
-  botText: {
-    color: '#1A1A1A',
-    fontSize: 16,
-    lineHeight: 22,
-  },
-  systemText: {
-    color: '#5D4037',
-  },
-  timestampContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  readIcon: {
-    marginRight: 4,
+    color: '#FFFFFF',
   },
   timestamp: {
     fontSize: 11,
-    opacity: 0.7,
+    marginTop: 4,
+    marginHorizontal: 4,
   },
-  userTimestamp: {
-    color: '#E6E6E6',
-  },
-  botTimestamp: {
+  streamingCursor: {
     color: '#666',
+    fontWeight: 'bold',
   },
 });
 
-// Export memoized component
-export default memo(ChatBubble, areEqual);
+export default ChatBubble;

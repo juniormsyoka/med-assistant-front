@@ -15,10 +15,12 @@ export interface ChatMessage {
   text: string;
   isUser: boolean;
   timestamp: Date;
+   type?: 'text' | 'image' | 'audio' | 'status'; 
+  conversationId: string; // ✅ ADDED: Essential for filtering messages by conversation
 
   // allow any of the MessageType values
- type?: MessageType;
-   //type?: 'text' | 'scan' | 'scan_result' | 'scan_error' | 'system';
+  //type?: MessageType;
+  //type?: 'text' | 'scan' | 'scan_result' | 'scan_error' | 'system';
   suggestions?: string[]; // for quick-reply buttons
   metadata?: {
     medicationId?: number;
@@ -36,11 +38,13 @@ export type CreateChatMessage = Omit<ChatMessage, 'id' | 'timestamp'> & {
 export const createChatMessage = (
   text: string,
   isUser: boolean,
+  conversationId: string, // ✅ ADDED: Required parameter
   options?: Partial<CreateChatMessage>
 ): ChatMessage => ({
   id: Date.now().toString() + Math.random().toString(36).slice(2, 9),
   text,
   isUser,
+  conversationId,
   timestamp: options?.timestamp ?? new Date(),
   ...(options ?? {}),
 });
@@ -51,9 +55,15 @@ export const isBotMessage = (m: ChatMessage) => !m.isUser;
 export const formatMessageTime = (ts: Date) =>
   ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+// Filter messages by conversation
+export const filterMessagesByConversation = (messages: ChatMessage[], conversationId: string): ChatMessage[] => {
+  return messages.filter(msg => msg.conversationId === conversationId);
+};
+
 // A typed message helper (if you want an explicit typed object)
 export const createTypedMessage = (
   text: string,
+  conversationId: string, // ✅ ADDED: Required parameter
   type: MessageType = 'text',
   data?: any
-): ChatMessage => createChatMessage(text, false, { type, metadata: data });
+): ChatMessage => createChatMessage(text, false, conversationId, { type: type as any, metadata: data });

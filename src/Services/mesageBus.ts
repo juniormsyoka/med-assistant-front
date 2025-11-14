@@ -5,7 +5,8 @@ type MessageCallback = (msg: ChatMessage) => void;
 class MessageBus {
   private listeners: Record<string, MessageCallback[]> = {};
 
-  emitMessage(conversationId: string, msg: ChatMessage) {
+  //
+emitMessage(conversationId: string, msg: ChatMessage) {
     this.listeners[conversationId]?.forEach(cb => cb(msg));
   }
 

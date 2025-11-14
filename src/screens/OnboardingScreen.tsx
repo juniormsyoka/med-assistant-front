@@ -20,6 +20,8 @@ import { fetchUserProfile } from '../Services/authService';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { supabase } from '../Services/supabaseClient';
 
+import { toast } from '@/Services/toastService';
+
 // Update the type definition to match your drawer navigator structure
 type PatientStackParamList = {
   Onboarding: undefined;
@@ -59,19 +61,19 @@ export default function OnboardingScreen({ navigation }: Props) {
       
       // Method 1: Try to get user from Supabase auth
       const { data: { user } } = await supabase.auth.getUser();
-      console.log('Supabase auth user:', user);
+     // console.log('Supabase auth user:', user);
       
       if (user?.id) {
         setPatientId(user.id);
-        console.log('Set patientId from auth:', user.id);
+      //  console.log('Set patientId from auth:', user.id);
       } else {
         // Method 2: Try fetchUserProfile
         try {
           const profile = await fetchUserProfile();
-          console.log('Fetched user profile:', profile);
+        //  console.log('Fetched user profile:', profile);
           if (profile?.id) {
             setPatientId(profile.id);
-            console.log('Set patientId from profile:', profile.id);
+         //   console.log('Set patientId from profile:', profile.id);
           }
         } catch (profileError) {
           console.error('Failed to fetch user profile:', profileError);
@@ -97,13 +99,14 @@ export default function OnboardingScreen({ navigation }: Props) {
       setHospitals(hospitalData);
       
       if (hospitalData.length === 0) {
-        setHospitalError('No hospitals found in your area. Please try again later or contact support.');
-      }
+      //  setHospitalError('No hospitals found in your area. Please try again later or contact support.');
+       toast.error('No hospitals found in your area. Please try again later or contact support.');
+      
+    }
     } catch (error: any) {
       console.error('Hospital fetch error:', error);
-      setHospitalError(
-        error.message || 'Failed to load hospitals. Please check your connection and try again.'
-      );
+      //setHospitalError(error.message || 'Failed to load hospitals. Please check your connection and try again.');
+        toast.error('Failed to load hospitals. Please check your connection and try again');
     } finally {
       setHospitalLoading(false);
       setRefreshing(false);
@@ -126,13 +129,13 @@ export default function OnboardingScreen({ navigation }: Props) {
       setDoctors(doctorData);
       
       if (doctorData.length === 0) {
-        setDoctorError(`No doctors available at the selected hospital. Please choose a different hospital or try again later.`);
+       // setDoctorError(`No doctors available at the selected hospital. Please choose a different hospital or try again later.`);
+      toast.error("No doctors available at the selected hospital. Please choose a different hospital or try again later.")
       }
     } catch (error: any) {
       console.error('Doctor fetch error:', error);
-      setDoctorError(
-        error.message || 'Failed to load doctors for this hospital. Please try again.'
-      );
+      //setDoctorError( error.message || 'Failed to load doctors for this hospital. Please try again.');
+      toast.error("'Failed to load doctors for this hospital. Please try again.'")
     } finally {
       setLoading(false);
     }
@@ -164,19 +167,19 @@ export default function OnboardingScreen({ navigation }: Props) {
   const handleSubmit = async () => {
     // Validate all required fields
     if (!selectedDoctor || !selectedHospital) {
-      Alert.alert('Selection Required', 'Please select both a hospital and a doctor to continue.');
+      toast.info('Selection Required!! Please select both a hospital and a doctor to continue.');
       return;
     }
 
     if (!patientId || patientId === '') {
-      Alert.alert('Authentication Error', 'Unable to identify your user account. Please try logging out and back in.');
+     toast.info('Authentication Error!! Unable to identify your user account. Please try logging out and back in.');
       return;
     }
 
     // Validate UUID format
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(patientId)) {
-      Alert.alert('Invalid User ID', 'Your user ID is not in the correct format. Please log out and try again.');
+      toast.info('Invalid User ID! Your user ID is not in the correct format. Please log out and try again.');
       return;
     }
 

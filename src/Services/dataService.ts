@@ -156,53 +156,90 @@ class DataService {
       return await localDB.getAppointments();
     }
   }
+   async addAppointment(appointmentData: CreateAppointment & { patient_id?: string, doctor_id?: string }) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('User not authenticated');
 
-  async addAppointment(appointment: CreateAppointment): Promise<number> {
-    try {
-      const localId = await localDB.addAppointment(appointment);
-      
-      if (this.isOnline) {
-        const supabaseData = this.toSupabaseAppointment(appointment);
-        const { data, error } = await supabase
-          .from('appointments')
-          .insert(supabaseData)
-          .select()
-          .single();
+    const { data, error } = await supabase
+      .from('appointments')
+      .insert([{
+        patient_id: appointmentData.patient_id || user.id,
+        doctor_id: appointmentData.doctor_id,
+        appointment_date: `${appointmentData.date}T${appointmentData.time}:00`,
+        status: 'scheduled',
+        notes: appointmentData.notes || `Appointment for: ${appointmentData.title}`,
+        // Store additional metadata in notes or create separate columns if needed
+      }])
+      .select()
+      .single();
 
-        if (!error && data) {
-          await this.syncLocalAppointment(localId, data.id);
-          return data.id;
-        }
-      }
-      
-      return localId;
-    } catch (error) {
-      console.error('Error adding appointment:', error);
-      return await localDB.addAppointment(appointment);
-    }
+    if (error) throw error;
+    return data;
   }
 
-  async updateAppointment(id: number, appointment: CreateAppointment): Promise<void> {
-    try {
-      await localDB.updateAppointment(id, appointment);
-      
-      if (this.isOnline) {
-        const supabaseData = this.toSupabaseAppointment(appointment);
-        const { error } = await supabase
-          .from('appointments')
-          .update(supabaseData)
-          .eq('local_id', id);
-
-        if (error) {
-          console.warn('Supabase appointment update failed:', error);
-        }
-      }
-    } catch (error) {
-      console.error('Error updating appointment:', error);
-      throw error;
+  async updateAppointment(id: string, appointmentData: Partial<CreateAppointment>) {
+    const updateData: any = {};
+    
+    if (appointmentData.date && appointmentData.time) {
+      updateData.appointment_date = `${appointmentData.date}T${appointmentData.time}:00`;
     }
+    if (appointmentData.notes) {
+      updateData.notes = appointmentData.notes;
+    }
+    if (appointmentData.title) {
+      // Store title in notes or add a title column to your table
+      updateData.notes = `${appointmentData.title} - ${appointmentData.notes || ''}`;
+    }
+
+    const { data, error } = await supabase
+      .from('appointments')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
   }
 
+  async getPatientAppointments(patientId?: string) {
+    const { data: { user } } = await supabase.auth.getUser();
+    const userId = patientId || user?.id;
+    
+    if (!userId) throw new Error('User not authenticated');
+
+    const { data, error } = await supabase
+      .from('appointments')
+      .select(`
+        *,
+        doctors:doctor_id (full_name, email),
+        patients:patient_id (full_name, email)
+      `)
+      .eq('patient_id', userId)
+      .order('appointment_date', { ascending: true });
+
+    if (error) throw error;
+    return data;
+  }
+
+  async getDoctorAppointments(doctorId?: string) {
+    const { data: { user } } = await supabase.auth.getUser();
+    const userId = doctorId || user?.id;
+    
+    if (!userId) throw new Error('User not authenticated');
+
+    const { data, error } = await supabase
+      .from('appointments')
+      .select(`
+        *,
+        patients:patient_id (full_name, email)
+      `)
+      .eq('doctor_id', userId)
+      .order('appointment_date', { ascending: true });
+
+    if (error) throw error;
+    return data;
+  }
   async deleteAppointment(id: number): Promise<void> {
     try {
       if (this.isOnline) {

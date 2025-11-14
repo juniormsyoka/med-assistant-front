@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { View, ScrollView, RefreshControl, Animated, TouchableWithoutFeedback , StyleSheet} from "react-native";
+import { View, ScrollView, RefreshControl, Animated, TouchableWithoutFeedback, TouchableOpacity, StyleSheet, Text } from "react-native";
 import { useFocusEffect, useTheme } from "@react-navigation/native";
+import { Ionicons } from "@expo/vector-icons";
 import * as Notifications from "expo-notifications";
 
 import { useMedicationStore } from "../stores/medicationStore";
@@ -11,7 +12,7 @@ import { WelcomeSection } from "../components/homescreen/WelcomeSection";
 import StatsSection from "../components/homescreen/StatsSection";
 import MedicationList from "../components/homescreen/MedicationList";
 import EmptyState from "../components/homescreen/EmptyState";
-import { ReminderPanel } from "../components/homescreen/ReminderPanel"; // ✅ New Pure JS Component
+import { ReminderPanel } from "../components/homescreen/ReminderPanel";
 import { DeleteConfirmationModal } from "../components/homescreen/DeleteConfirmationModal";
 import { AppointmentsSection } from "../components/homescreen/AppointmentsSection";
 import { RefillAlertBanner } from "../components/homescreen/RefillAlertBanner";
@@ -23,10 +24,13 @@ import { getUpcomingAppointments, markAppointmentCompleted } from "../Services/s
 import { getLowSupplyMedications, markRefillCompleted } from "../Services/storage";
 import { Appointment } from "../models/Appointment";
 
+import { useAuth } from "../contexts/AuthContext";
+
 const HomeScreen = ({ navigation }: any) => {
   const { colors } = useTheme();
   const { showFeedback } = useFeedback();
   const { profile, loading: profileLoading } = useUserProfile();
+  const { user } = useAuth();
 
   const {
     medications,
@@ -49,7 +53,7 @@ const HomeScreen = ({ navigation }: any) => {
   const [loadingAppointments, setLoadingAppointments] = useState(true);
 
   const alreadyShownRef = useRef<Set<string>>(new Set());
-  const overlayOpacity = useRef(new Animated.Value(0)).current; // ✅ Animated fade background
+  const overlayOpacity = useRef(new Animated.Value(0)).current;
 
   const stats = {
     total: medications.length,
@@ -59,6 +63,51 @@ const HomeScreen = ({ navigation }: any) => {
     skipped: medications.filter((m) => m.status === "skipped").length,
     late: medications.filter((m) => m.status === "late").length,
     rescheduled: medications.filter((m) => m.status === "rescheduled").length,
+  };
+
+  // Role-based appointment button component
+  const RoleBasedAppointmentButton = () => {
+    if (user?.role === 'doctor') {
+      return (
+        <TouchableOpacity 
+          style={[styles.appointmentButton, { backgroundColor: colors.card, borderLeftColor: '#FF6B6B' }]}
+          onPress={() => navigation.navigate('DoctorDashboard' as any)}
+        >
+          <View style={styles.buttonContent}>
+            <Ionicons name="medical" size={24} color="#FF6B6B" />
+            <View style={styles.buttonText}>
+              <Text style={[styles.buttonTitle, { color: colors.text }]}>
+                Doctor Dashboard
+              </Text>
+              <Text style={[styles.buttonSubtitle, { color: colors.text }]}>
+                Manage patient appointments
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.text} />
+          </View>
+        </TouchableOpacity>
+      );
+    } else {
+      return (
+        <TouchableOpacity 
+          style={[styles.appointmentButton, { backgroundColor: colors.card, borderLeftColor: '#4361EE' }]}
+          onPress={() => navigation.navigate('PatientAppointments' as any)}
+        >
+          <View style={styles.buttonContent}>
+            <Ionicons name="calendar" size={24} color="#4361EE" />
+            <View style={styles.buttonText}>
+              <Text style={[styles.buttonTitle, { color: colors.text }]}>
+                My Appointments
+              </Text>
+              <Text style={[styles.buttonSubtitle, { color: colors.text }]}>
+                View and manage all appointments
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.text} />
+          </View>
+        </TouchableOpacity>
+      );
+    }
   };
 
   // -----------------------------
@@ -235,11 +284,21 @@ const HomeScreen = ({ navigation }: any) => {
           <StatsSection stats={stats} />
         </View>
 
+        {/* ✅ Role-based appointment button */}
+        <RoleBasedAppointmentButton />
+
         <AppointmentsSection
           appointments={appointments}
           onAddAppointment={handleAddAppointment}
           onEditAppointment={handleEditAppointment}
           onCompleteAppointment={handleCompleteAppointment}
+          onViewAllAppointments={() => {
+            if (user?.role === 'doctor') {
+              navigation.navigate('DoctorDashboard' as any);
+            } else {
+              navigation.navigate('PatientAppointments' as any);
+            }
+          }}
         />
 
         <View style={{ padding: 20 }}>
@@ -310,5 +369,37 @@ const HomeScreen = ({ navigation }: any) => {
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  appointmentButton: {
+    marginHorizontal: 16,
+    marginVertical: 8,
+    padding: 16,
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  buttonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  buttonText: {
+    flex: 1,
+  },
+  buttonTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  buttonSubtitle: {
+    fontSize: 14,
+    opacity: 0.7,
+  },
+});
 
 export default HomeScreen;

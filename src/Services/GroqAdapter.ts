@@ -1,4 +1,4 @@
-import { ChatMessage } from "../models/ChatMessage";
+import { ChatMessage, createChatMessage } from "../models/ChatMessage";
 import { sendChatMessageStreamXHR } from "../Services/api";
 
 export const GroqAdapter = {
@@ -13,13 +13,15 @@ export const GroqAdapter = {
     text: string;
     onResponse: (msg: ChatMessage) => void;
   }) => {
-    // Create ONE placeholder AI message
-    const aiMsg: ChatMessage = {
-      id: `ai-${Date.now()}`,
-      text: "",
-      isUser: false,
-      timestamp: new Date(),
-    };
+    // ✅ Use factory function WITHOUT custom ID (let it generate one)
+    const aiMsg = createChatMessage(
+      "", // Start with empty text
+      false, // isUser
+      conversationId, // conversationId
+      {
+        timestamp: new Date(),
+      }
+    );
     
     // ✅ Only call onResponse ONCE with the initial empty message
     onResponse(aiMsg);

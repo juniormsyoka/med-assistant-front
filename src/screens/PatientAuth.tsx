@@ -8,6 +8,8 @@ import { useNavigation } from '@react-navigation/native';
 import { useRoleNavigation } from '@/hooks/useRoleNavigation';
 import { resendVerificationEmail } from '@/Services/authService';
 
+import { toast } from '../Services/toastService';
+
 type UserRole = 'super_admin' | 'admin' | 'doctor' | 'patient';
 
 export default function PatientAuthScreen() {
@@ -55,13 +57,13 @@ export default function PatientAuthScreen() {
     });
 
     if (!email || !password || (mode === 'signup' && !fullName)) {
-      Alert.alert('Missing Info', 'Please fill all required fields.');
+      toast.error('Please fill all required fields.');
       return;
     }
 
     // Validate doctor signup
     if (mode === 'signup' && isDoctorSignup && !invitationToken) {
-      Alert.alert('Missing Invitation', 'Please enter your invitation token to sign up as a doctor.');
+      toast.error('Please enter your invitation token to sign up as a doctor.');
       return;
     }
 
@@ -69,7 +71,7 @@ export default function PatientAuthScreen() {
     try {
       if (mode === 'signup') {
         if (isDoctorSignup) {
-          console.log('👨‍⚕️ [UI] Starting doctor signup process...');
+         // console.log('👨‍⚕️ [UI] Starting doctor signup process...');
           
           // Doctor signup with invitation token
           const result = await signUpUserWithInvitation({ 
@@ -85,8 +87,7 @@ export default function PatientAuthScreen() {
           });
 
           // SIMPLIFIED: Just show success message for doctors
-          Alert.alert(
-            'Doctor Account Created!',
+          toast.success(
             'Your doctor account has been created successfully. Please wait for admin verification before you can access the system.'
           );
           
@@ -95,42 +96,40 @@ export default function PatientAuthScreen() {
           console.log('👤 [UI] Starting patient signup process...');
           const result = await signUpUser({ email, password, fullName });
           
-          console.log('📨 [UI] Patient signup result:', {
+        /*  console.log('📨 [UI] Patient signup result:', {
             user: result?.user?.id,
             session: !!result?.session,
             emailConfirmed: result?.user?.email_confirmed_at
-          });
+          });*/
 
           if (result.user && !result.session) {
-            Alert.alert(
-              'Check Your Email',
-              'A confirmation link has been sent. Please verify your email before logging in.'
+            toast.info(
+              'Check Your Email confirmation link has been sent. Please verify your email before logging in.'
             );
             setShowResendOption(true);
           } else {
-            Alert.alert(
-              'Account Created!',
-              'Your account has been created successfully!'
+            toast.success(
+              'Account Created successfully!',
             );
           }
         }
       } else {
         // Login (same for both)
-        console.log('🔐 [UI] Starting login process...');
+      //  console.log('🔐 [UI] Starting login process...');
         const result = await signInUser(email, password);
-        console.log('✅ [UI] Login successful:', {
+     /*   console.log('✅ [UI] Login successful:', {
           role: result.role,
           email: result.user.email
-        });
-        
-        const roleMessage = getRoleWelcomeMessage(result.role);
-        Alert.alert('Welcome Back', roleMessage);
-        
+        });*/
         await navigateByRole();
+        const roleMessage = getRoleWelcomeMessage(result.role);
+        toast.success(roleMessage);
+        
+        
       }
     } catch (err: any) {
       console.error('💥 [UI] Auth error:', err);
-      Alert.alert('Error', err.message || 'An unexpected error occurred');
+      toast.error(err.message || 'An unexpected error occurred');
     } finally {
       setLoading(false);
     }
@@ -153,18 +152,18 @@ export default function PatientAuthScreen() {
 
   const handleResendEmail = async () => {
     if (!email) {
-      Alert.alert('Missing Email', 'Please enter your email to resend confirmation.');
+      toast.error('Please enter your email to resend confirmation.');
       return;
     }
 
     setLoading(true);
     try {
       await resendVerificationEmail(email);
-      Alert.alert('Email Sent', 'A new confirmation link has been sent to your email.');
+      toast.success('A new confirmation link has been sent to your email.');
       setShowResendOption(false);
     } catch (err: any) {
       console.error('❌ [UI] Resend email error:', err);
-      Alert.alert('Error', err.message);
+      toast.error(err.message);
     } finally {
       setLoading(false);
     }
@@ -172,16 +171,13 @@ export default function PatientAuthScreen() {
 
   const handleDebugCheck = async () => {
     if (!email) {
-      Alert.alert('Debug', 'Please enter an email first');
+      toast.info('Please enter an email first');
       return;
     }
 
     console.log('🐛 [DEBUG] Checking user existence for:', email);
     const result = await checkUserExists(email);
-    Alert.alert(
-      'Debug Info', 
-      `User exists: ${result.exists}\nRole: ${result.data?.role}\nVerified: ${result.data?.is_verified}`
-    );
+    toast.info(`User exists: ${result.exists}\nRole: ${result.data?.role}\nVerified: ${result.data?.is_verified}`);
   };
 
   return (

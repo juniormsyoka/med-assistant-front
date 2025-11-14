@@ -6,22 +6,36 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/Services/supabaseClient';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useTheme } from '@react-navigation/native';
+import { chatService } from '@/Services/chatService';
 
+// In DoctorDashboard.tsx - Update the type definition
 type DoctorStackParamList = {
   DoctorDashboard: undefined;
   PatientDetail: { patientId: string };
-  ChatRoom: any;
+  ChatRoom: { // ✅ Replace 'any' with proper type
+    mode: 'doctor';
+    adapter: string;
+    conversationId: string;
+    userRole: string;
+    userId: string;
+    patientId: string;
+    patientName: string;
+    assignedDoctorId?: string;
+  };
   AppointmentSchedule: undefined;
+  DoctorChatList: undefined; // ✅ Add this if you use it
+  addAppointment: undefined;
 };
 
 type DoctorNavigationProp = NativeStackNavigationProp<DoctorStackParamList>;
-
 interface Patient {
   id: string;
   full_name: string;
   email: string;
-  last_chat_date?: string;
-  upcoming_appointment?: string;
+  last_message?: string;
+  last_message_time?: string;
+  unread_count?: number;
 }
 
 interface Appointment {
@@ -41,49 +55,98 @@ export default function DoctorDashboard() {
     appointmentsToday: 0,
     unreadMessages: 0
   });
+  const { colors } = useTheme();
 
   useEffect(() => {
     loadDoctorData();
   }, [user?.id]);
 
-  const loadDoctorData = async () => {
+  // In DoctorDashboard.tsx - Update the loadDoctorData function
+
+const loadDoctorData = async () => {
   if (!user?.id) return;
 
   try {
-    // Get assigned patients
-    const { data: patientsData, error: patientsError } = await supabase
+    // Get assigned patients with their actual names
+    const { data: assignments, error: patientsError } = await supabase
       .from('patient_doctor')
       .select(`
         patient_id,
         patients:patient_id (
           id,
           full_name,
-          email,
-          created_at
+          email
         )
       `)
-      .eq('doctor_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(5);
+      .eq('doctor_id', user.id);
 
     if (patientsError) {
       console.error('Error loading patients:', patientsError);
       throw patientsError;
     }
 
-    const formattedPatients: Patient[] = patientsData?.map(assignment => {
-      const patient = assignment.patients?.[0];
-      return {
-        id: assignment.patient_id,
-        full_name: patient?.full_name || 'Unknown Patient',
-        email: patient?.email || '',
-        last_chat_date: undefined,
-        upcoming_appointment: undefined
-      };
-    }) || [];
+    console.log('📊 Raw assignments data:', assignments); // Debug log
 
+    // Format patients properly
+    const formattedPatients: Patient[] = [];
+    
+    if (assignments && assignments.length > 0) {
+      for (const assignment of assignments) {
+        console.log('🔍 Processing assignment:', assignment); // Debug log
+        
+        // The patients field might be an array, get the first item
+        const patientData = Array.isArray(assignment.patients) 
+          ? assignment.patients[0] 
+          : assignment.patients;
+
+        console.log('👤 Patient data:', patientData); // Debug log
+
+        if (patientData) {
+          // Get the latest message for this patient
+          const { data: lastMsg } = await supabase
+            .from('messages')
+            .select('text, created_at')
+            .eq('conversation_id', `doctor-${user.id}-patient-${assignment.patient_id}`)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+          formattedPatients.push({
+            id: assignment.patient_id,
+            full_name: patientData.full_name || 'Unknown Patient',
+            email: patientData.email || '',
+            last_message: lastMsg?.text,
+            last_message_time: lastMsg?.created_at,
+            unread_count: 0
+          });
+        } else {
+          console.warn('⚠️ No patient data found for assignment:', assignment.patient_id);
+          
+          // Fallback: Try to get patient data directly
+          const { data: directPatient } = await supabase
+            .from('users')
+            .select('full_name, email')
+            .eq('id', assignment.patient_id)
+            .single();
+
+          if (directPatient) {
+            formattedPatients.push({
+              id: assignment.patient_id,
+              full_name: directPatient.full_name || 'Unknown Patient',
+              email: directPatient.email || '',
+              last_message: undefined,
+              last_message_time: undefined,
+              unread_count: 0
+            });
+          }
+        }
+      }
+    }
+
+    console.log('✅ Final formatted patients:', formattedPatients); // Debug log
     setPatients(formattedPatients);
 
+    // ... rest of the function (appointments and stats) remains the same
     // Get today's appointments
     const today = new Date().toISOString().split('T')[0];
     const { data: appointmentsData, error: appointmentsError } = await supabase
@@ -113,7 +176,6 @@ export default function DoctorDashboard() {
 
     setTodayAppointments(formattedAppointments);
 
-    // ✅ STATS SECTION - Add this code here:
     // Get total patients count
     const { count: totalPatients, error: countError } = await supabase
       .from('patient_doctor')
@@ -129,7 +191,7 @@ export default function DoctorDashboard() {
     setStats({
       totalPatients: totalPatients || 0,
       appointmentsToday: formattedAppointments.length,
-      unreadMessages: 0 // You can implement this later
+      unreadMessages: 0
     });
 
   } catch (error) {
@@ -138,36 +200,65 @@ export default function DoctorDashboard() {
   }
 };
 
-  const handleStartChat = (patient: Patient) => {
-    navigation.navigate('ChatRoom', {
-      mode: 'doctor',
-      conversationId: `doctor-${user?.id}-patient-${patient.id}`,
-      userRole: 'doctor',
-      userId: user?.id,
-      assignedDoctorId: user?.id,
-      patientId: patient.id,
-      patientName: patient.full_name
-    });
+  const handlePatientPress = async (patient: Patient) => {
+    if (!user?.id) return;
+
+    try {
+      const conversationId = await chatService.getOrCreateConversation(
+        patient.id,
+        user.id
+      );
+
+      navigation.navigate('ChatRoom', {
+        mode: 'doctor',
+        adapter: 'DoctorAdapter',
+        conversationId,
+        userRole: 'doctor',
+        userId: user.id,
+        patientId: patient.id,
+        patientName: patient.full_name,
+      });
+    } catch (error) {
+      console.error('Failed to get conversation UUID:', error);
+      Alert.alert('Error', 'Unable to open chat with patient.');
+    }
   };
 
   const renderPatientItem = ({ item }: { item: Patient }) => (
-    <TouchableOpacity 
-      style={styles.patientCard}
-      onPress={() => handleStartChat(item)}
+    <TouchableOpacity
+      style={styles.patientItem}
+      onPress={() => handlePatientPress(item)}
     >
-      <View style={styles.patientAvatar}>
+      <View style={styles.avatar}>
         <Ionicons name="person" size={24} color="#4361EE" />
       </View>
+      
       <View style={styles.patientInfo}>
         <Text style={styles.patientName}>{item.full_name}</Text>
         <Text style={styles.patientEmail}>{item.email}</Text>
+        {item.last_message && (
+          <Text style={styles.lastMessage} numberOfLines={1}>
+            {item.last_message}
+          </Text>
+        )}
       </View>
-      <TouchableOpacity 
-        style={styles.chatButton}
-        onPress={() => handleStartChat(item)}
-      >
-        <Ionicons name="chatbubble" size={20} color="#4361EE" />
-      </TouchableOpacity>
+
+      <View style={styles.rightSection}>
+        {item.last_message_time && (
+          <Text style={styles.timeText}>
+            {new Date(item.last_message_time).toLocaleTimeString([], { 
+              hour: '2-digit', 
+              minute: '2-digit' 
+            })}
+          </Text>
+        )}
+        {item.unread_count && item.unread_count > 0 && (
+          <View style={styles.unreadBadge}>
+            <Text style={styles.unreadText}>{item.unread_count}</Text>
+          </View>
+        )}
+        <Ionicons name="chevron-forward" size={20} color="#666" />
+      </View>
     </TouchableOpacity>
   );
 
@@ -204,7 +295,7 @@ export default function DoctorDashboard() {
   );
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={styles.header}>
         <View>
@@ -261,20 +352,21 @@ export default function DoctorDashboard() {
         )}
       </View>
 
-      {/* My Patients */}
+      {/* My Patients - UPDATED to match DoctorChatList style */}
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>My Patients</Text>
-          <TouchableOpacity>
+          <Text style={styles.sectionTitle}>Your Patients</Text>
+        {/*  <TouchableOpacity onPress={() => navigation.navigate('DoctorChatList')}>
             <Text style={styles.seeAllText}>See All</Text>
-          </TouchableOpacity>
+          </TouchableOpacity>*/}
         </View>
         {patients.length > 0 ? (
           <FlatList
-            data={patients}
+            data={patients.slice(0, 5)} // Show only first 5 patients
             keyExtractor={(item) => item.id}
             renderItem={renderPatientItem}
             scrollEnabled={false}
+            contentContainerStyle={styles.patientListContent}
           />
         ) : (
           <View style={styles.emptyState}>
@@ -288,7 +380,7 @@ export default function DoctorDashboard() {
       <View style={styles.quickActions}>
         <Text style={styles.sectionTitle}>Quick Actions</Text>
         <View style={styles.actionsRow}>
-          <TouchableOpacity style={styles.quickAction}>
+          <TouchableOpacity style={styles.quickAction}  onPress={() => navigation.navigate('AddAppointment' as any)} >
             <View style={[styles.quickActionIcon, { backgroundColor: '#4361EE20' }]}>
               <Ionicons name="calendar" size={24} color="#4361EE" />
             </View>
@@ -320,6 +412,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa',
   },
   header: {
+    paddingTop: 50,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -434,21 +527,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
-  patientCard: {
+  // UPDATED Patient List Styles to match DoctorChatList
+  patientListContent: {
+    gap: 12,
+  },
+  patientItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: 'white',
+    padding: 16,
     borderRadius: 12,
-    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  patientAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#4361EE20',
-    justifyContent: 'center',
+  avatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#e9ecef',
     alignItems: 'center',
+    justifyContent: 'center',
     marginRight: 12,
   },
   patientInfo: {
@@ -456,16 +557,39 @@ const styles = StyleSheet.create({
   },
   patientName: {
     fontSize: 16,
-    fontWeight: '500',
-    color: '#1a1a1a',
+    fontWeight: '600',
+    color: '#333',
     marginBottom: 2,
   },
   patientEmail: {
     fontSize: 14,
     color: '#666',
+    marginBottom: 4,
   },
-  chatButton: {
-    padding: 8,
+  lastMessage: {
+    fontSize: 14,
+    color: '#999',
+  },
+  rightSection: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  timeText: {
+    fontSize: 12,
+    color: '#999',
+  },
+  unreadBadge: {
+    backgroundColor: '#4361EE',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unreadText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   emptyState: {
     alignItems: 'center',

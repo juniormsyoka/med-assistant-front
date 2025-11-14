@@ -30,6 +30,9 @@ import DoctorDashboard from "./src/screens/doctor/DoctorDashboard";
 import OnboardingScreen from "./src/screens/OnboardingScreen";
 
 import DoctorInvitesignup from "./src/screens/auth/DoctorInviteSignUp";
+
+import PatientAppointmentsScreen from "./src/screens/PatientAppointmentsScreen";
+
 // Super Admin Screens
 import SuperAdminDashboard from "./src/screens/superAdmin/SuperAdminDashboard";
 import HospitalManagement from "./src/screens/superAdmin/HospitalManagement";
@@ -50,6 +53,12 @@ import { FeedbackProvider } from "./src/contexts/FeedbackContext";
 import CustomDrawer from "./src/components/CustomDrawer";
 import AnimatedFloatingButton from "./src/components/AnimatedFloatingButton";
 import { AuthProvider, useAuth } from "./src/contexts/AuthContext";
+
+import DoctorChatList from "./src/components/DoctorChatList";
+
+
+import Toast from 'react-native-toast-message';
+import { toastConfig } from './src/config/toastConfig';
 
 import * as Linking from "expo-linking";
 
@@ -208,6 +217,7 @@ function AppContent() {
       />
       <HomeStack.Screen name="Add" component={AddMedScreen} />
       <HomeStack.Screen name="AddAppointment" component={AddAppointmentScreen} />
+        <HomeStack.Screen name="PatientAppointments" component={PatientAppointmentsScreen} />
     </HomeStack.Navigator>
   );
 
@@ -281,19 +291,55 @@ function AppContent() {
   );
 
   // Doctor Stack
-  type DoctorStackParamList = {
-    DoctorDashboard: undefined;
-    PatientDetail: { patientId: string };
-    AppointmentSchedule: undefined;
+  // In App.tsx - Update the navigator to include ChatRoom screen
+type DoctorStackParamList = {
+  DoctorDashboard: undefined;
+  PatientDetail: { patientId: string };
+  ChatRoom: { // ✅ ADD THIS
+    mode: 'doctor';
+    adapter: string;
+    conversationId: string;
+    userRole: string;
+    userId: string;
+    patientId: string;
+    patientName: string;
+    assignedDoctorId?: string;
   };
+  AppointmentSchedule: undefined;
+  DoctorChatList: undefined; // ✅ Add this if you use it
+  AddAppointment: undefined;
+};
 
-  const DoctorStack = createNativeStackNavigator<DoctorStackParamList>();
 
-  const DoctorStackScreen = () => (
-    <DoctorStack.Navigator screenOptions={{ headerShown: false }}>
-      <DoctorStack.Screen name="DoctorDashboard" component={DoctorDashboard} />
-    </DoctorStack.Navigator>
-  );
+
+const DoctorStack = createNativeStackNavigator<DoctorStackParamList>();
+
+const DoctorStackScreen = () => (
+  <DoctorStack.Navigator screenOptions={{ headerShown: false }}>
+    <DoctorStack.Screen name="DoctorDashboard" component={DoctorDashboard} />
+    {/* ✅ ADD ChatRoom screen to the navigator */}
+    <DoctorStack.Screen 
+      name="ChatRoom" 
+      component={ChatRoom} 
+      options={{ 
+        headerShown: true, 
+        title: 'Chat with Patient',
+        headerBackTitle: 'Back' 
+      }}
+    />
+    {/* ✅ Add DoctorChatList if you use it */}
+    <DoctorStack.Screen name="DoctorChatList" component={DoctorChatList} />
+     <DoctorStack.Screen 
+      name="AddAppointment" 
+      component={AddAppointmentScreen}
+      options={{
+        headerShown: true,
+        title: 'Schedule Appointment',
+        headerBackTitle: 'Back'
+      }}
+    />
+  </DoctorStack.Navigator>
+);
 
   // Auth Stack
   const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -407,7 +453,18 @@ function AppContent() {
           }}
         >
           {(props) => <ScreenWithFAB component={OnboardingScreen} {...props} />}
-        </Drawer.Screen>
+        </Drawer.Screen>,
+        <Drawer.Screen
+      key="PatientAppointments"
+      name="PatientAppointments"
+      options={{
+        drawerLabel: "My Appointments",
+        drawerIcon: ({ color, size }) => <Ionicons name="calendar" size={size} color={color} />,
+      }}
+    >
+      {(props) => <ScreenWithFAB component={PatientAppointmentsScreen} {...props} />}
+    </Drawer.Screen>
+
       );
     }
 
@@ -489,6 +546,7 @@ function AppContent() {
           {getDrawerScreens()}
         </Drawer.Navigator>
       </NavigationContainer>
+       <Toast config={toastConfig} />
     </DrawerContext.Provider>
   );
 }
