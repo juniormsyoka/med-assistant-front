@@ -1,10 +1,9 @@
 // components/homescreen/WelcomeSection.tsx
 import { View, Text, Image, TouchableOpacity } from "react-native";
+import React, { useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
-
+import { useAuth } from '@/contexts/AuthContext'; 
 interface Props {
-  userName?: string;
-  profilePicture?: string;
   theme: {
     primary: string;
     background: string;
@@ -16,13 +15,13 @@ interface Props {
   onProfilePress?: () => void;
 }
 
-export const WelcomeSection: React.FC<Props> = ({ 
-  userName, 
-  profilePicture, 
+export const WelcomeSection: React.FC<Props> = ({  
   theme,
   onProfilePress 
-}) => {
-
+    }) => {
+    const { user } = useAuth(); 
+      const [profilePicture, setProfilePicture] = useState<string | undefined>(undefined);
+    const userName = user?.full_name || user?.email;
   return (
     <View style={{ marginBottom: 24 }}>
       <View
@@ -64,7 +63,7 @@ export const WelcomeSection: React.FC<Props> = ({
             width: 56,
             height: 56,
             borderRadius: 28,
-            backgroundColor: profilePicture ? 'transparent' : "#F0F4FF",
+           backgroundColor: profilePicture ? 'transparent' : "#F0F4FF",
             justifyContent: "center",
             alignItems: "center",
             borderWidth: 2,
@@ -82,11 +81,7 @@ export const WelcomeSection: React.FC<Props> = ({
                 borderRadius: 28,
               }}
               resizeMode="cover"
-         //     onLoad={() => console.log('WelcomeSection: Profile image loaded successfully')}
-         //     onError={(e) => {
-          //      console.error('WelcomeSection: Error loading profile image:', e.nativeEvent.error);
-         //       console.log('WelcomeSection: Failed to load URI:', profilePicture);
-         //     }}
+       
             />
           ) : (
             <Ionicons name="person" size={24} color={theme.primary} />

@@ -4,25 +4,58 @@ import { View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { useTheme } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
+import { StyleSheet } from 'react-native'; // Add StyleSheet
 
 interface Props {
-  appointments: any[];
+  appointments?: any[]; // Make optional
   onAddAppointment: () => void;
-  onViewAllAppointments: () => void;
+  onViewAllAppointments?: () => void; // Make optional
   onEditAppointment?: (appointment: any) => void;
   onCompleteAppointment?: (id: number) => void;
+  isLoading?: boolean; // Add loading
 }
 
 export const AppointmentsSection: React.FC<Props> = ({
-  appointments,
+  appointments = [], // Default to empty array
   onAddAppointment,
   onViewAllAppointments,
   onEditAppointment,
   onCompleteAppointment,
+  isLoading = false,
 }) => {
   const { colors } = useTheme();
   const { user } = useAuth();
+  
+  // Guest state (no user logged in)
+  if (!user) {
+    return (
+      <View style={[styles.guestContainer, { backgroundColor: colors.card }]}>
+        <View style={[styles.guestIconContainer, { backgroundColor: `${colors.primary}15` }]}>
+          <Ionicons name="calendar" size={40} color={colors.primary} />
+        </View>
+        <Text style={[styles.guestTitle, { color: colors.text }]}>
+          Manage Your Appointments
+        </Text>
+        <Text style={[styles.guestText, { color: colors.text, opacity: 0.7 }]}>
+          Sign in to schedule and track your medical appointments and reminders.
+        </Text>
+      </View>
+    );
+  }
+  
   const isDoctor = user?.role === 'doctor';
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <View style={[styles.loadingContainer, { backgroundColor: colors.card }]}>
+        <Ionicons name="time-outline" size={48} color={colors.primary} />
+        <Text style={[styles.loadingText, { color: colors.text }]}>
+          Loading appointments...
+        </Text>
+      </View>
+    );
+  }
 
   // Filter and prepare appointments based on user role
   const getDisplayAppointments = () => {
@@ -102,6 +135,7 @@ export const AppointmentsSection: React.FC<Props> = ({
     return 'medical';
   };
 
+  // Empty state (no appointments)
   if (displayAppointments.length === 0) {
     return (
       <View style={{ marginVertical: 16 }}>
@@ -115,14 +149,7 @@ export const AppointmentsSection: React.FC<Props> = ({
         </View>
 
         <TouchableOpacity 
-          style={{
-            padding: 20,
-            borderWidth: 1,
-            borderColor: colors.border,
-            borderRadius: 8,
-            alignItems: 'center',
-            marginHorizontal: 16,
-          }}
+          style={[styles.emptyContainer, { borderColor: colors.border }]}
           onPress={onAddAppointment}
         >
           <Ionicons 
@@ -145,6 +172,7 @@ export const AppointmentsSection: React.FC<Props> = ({
     );
   }
 
+  // Normal state (with appointments)
   return (
     <View style={{ marginVertical: 16 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingHorizontal: 16 }}>
@@ -152,11 +180,13 @@ export const AppointmentsSection: React.FC<Props> = ({
           {isDoctor ? '👨‍⚕️ Upcoming Appointments' : '🗓️ Upcoming Appointments'}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-          <TouchableOpacity onPress={onViewAllAppointments}>
-            <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 14 }}>
-              View All
-            </Text>
-          </TouchableOpacity>
+          {onViewAllAppointments && (
+            <TouchableOpacity onPress={onViewAllAppointments}>
+              <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 14 }}>
+                View All
+              </Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity onPress={onAddAppointment}>
             <Ionicons name="add-circle" size={24} color={colors.primary} />
           </TouchableOpacity>
@@ -264,3 +294,55 @@ export const AppointmentsSection: React.FC<Props> = ({
     </View>
   );
 };
+
+// Add styles
+const styles = StyleSheet.create({
+  guestContainer: {
+    padding: 32,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginVertical: 16,
+  },
+  guestIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 20,
+  },
+  guestTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  guestText: {
+    fontSize: 15,
+    textAlign: "center",
+    lineHeight: 22,
+    paddingHorizontal: 8,
+  },
+  loadingContainer: {
+    padding: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    marginVertical: 16,
+  },
+  loadingText: {
+    fontSize: 16,
+    marginTop: 16,
+    fontWeight: "500",
+  },
+  emptyContainer: {
+    padding: 20,
+    borderWidth: 1,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginHorizontal: 16,
+  },
+});
+
+export default AppointmentsSection;

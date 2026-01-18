@@ -26,13 +26,25 @@ interface HospitalInfo {
   address?: string;
 }
 
-export default function InviteDoctorScreen() {
+interface InviteUserScreenProps {
+  role?: 'doctor' | 'admin';
+  title?: string;
+  subtitle?: string;
+  userType?: string; // For email text
+}
+
+export default function InviteUserScreen({ 
+  role = 'doctor', 
+  title = 'Invite Doctor',
+  subtitle = 'Send an invitation to join your hospital',
+  userType = 'doctor'
+}: InviteUserScreenProps) {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [inviteLink, setInviteLink] = useState('');
   const [hospitalInfo, setHospitalInfo] = useState<HospitalInfo | null>(null);
   const { user } = useAuth();
-   const { colors } = useTheme();
+  const { colors } = useTheme();
 
   // Load hospital information
   useEffect(() => {
@@ -68,23 +80,28 @@ export default function InviteDoctorScreen() {
       await Clipboard.setStringAsync(inviteLink);
       Alert.alert(
         '✅ Link Copied!', 
-        'Invitation link copied to clipboard. You can now paste it in an email or message to the doctor.',
+        `Invitation link copied to clipboard. You can now paste it in an email or message to the ${userType}.`,
         [{ text: 'OK' }]
       );
     }
   };
 
- const sendEmailManually = async (
-  email: string,
-  token: string,
-  hospitalName: string
-) => {
-  const subject = `Invitation to Join ${hospitalName} - MedAssistant`;
+  const sendEmailManually = async (
+    email: string,
+    token: string,
+    hospitalName: string
+  ) => {
+    const roleDisplayName = userType === 'admin' ? 'Administrator' : 'Doctor';
+    const signupInstructions = userType === 'admin' 
+      ? 'Select "Sign up as Administrator"'
+      : 'Select "Sign up as Doctor"';
 
-  const body = `
-Hello Doctor,
+    const subject = `Invitation to Join ${hospitalName} - MedAssistant`;
 
-You've been invited to join ${hospitalName} on MedAssistant as a healthcare provider.
+    const body = `
+Hello ${roleDisplayName},
+
+You've been invited to join ${hospitalName} on MedAssistant as a ${userType}.
 
 Your invitation token is:
 ${token}
@@ -92,96 +109,124 @@ ${token}
 To sign up:
 1. Open the MedAssistant app
 2. Go to Authentication
-3. Select "Sign up as Doctor" 
+3. ${signupInstructions}
 4. Enter this token: ${token}
 5. Complete your registration
 
 This invitation token will expire in 7 days.
 
 Once you join, you'll be able to:
-• Manage your patient appointments
-• Communicate with patients securely
-• Access medical records (where permitted)
-• Prescribe medications digitally
+${userType === 'admin' 
+  ? '• Manage hospital staff and doctors\n• Oversee patient assignments\n• Monitor system operations\n• Generate reports and analytics'
+  : '• Manage your patient appointments\n• Communicate with patients securely\n• Access medical records (where permitted)\n• Prescribe medications digitally'
+}
 
-If you have any questions, please contact your hospital administrator.
+If you have any questions, please contact your system administrator.
 
 Best regards,
 MedAssistant Team
-  `.trim();
+    `.trim();
 
-  try {
-    // Open device email client
-    const mailUrl = `mailto:${email}?subject=${encodeURIComponent(
-      subject
-    )}&body=${encodeURIComponent(body)}`;
+    try {
+      // Open device email client
+      const mailUrl = `mailto:${email}?subject=${encodeURIComponent(
+        subject
+      )}&body=${encodeURIComponent(body)}`;
 
-    const canOpen = await Linking.canOpenURL(mailUrl);
-    if (canOpen) {
-      await Linking.openURL(mailUrl);
-      return true;
-    } else {
+      const canOpen = await Linking.canOpenURL(mailUrl);
+      if (canOpen) {
+        await Linking.openURL(mailUrl);
+        return true;
+      } else {
+        Alert.alert(
+          'Email App Not Found',
+          `Please copy the invitation token and send it manually to the ${userType}.`,
+          [{ text: 'OK' }]
+        );
+        return false;
+      }
+    } catch (error) {
+      console.error('Error opening email client:', error);
       Alert.alert(
-        'Email App Not Found',
-        'Please copy the invitation token and send it manually to the doctor.',
-        [{ text: 'OK' }]
+        'Error',
+        'Failed to open email client. Please copy the token and send it manually.'
       );
       return false;
     }
-  } catch (error) {
-    console.error('Error opening email client:', error);
-    Alert.alert(
-      'Error',
-      'Failed to open email client. Please copy the token and send it manually.'
-    );
-    return false;
-  }
-};
-
+  };
 
   const handleInvite = async () => {
-  // ... validation code ...
+    if (!email) {
+      Alert.alert('Error', 'Please enter an email address');
+      return;
+    }
 
-  setLoading(true);
-  try {
-    // Generate a secure token
-    const token = Crypto.randomUUID();
+    if (!email.includes('@')) {
+      Alert.alert('Error', 'Please enter a valid email address');
+      return;
+    }
 
-    // Insert invitation
-    const { data, error } = await supabase
-      .from('invitations')
-      .insert([
-        {
-          email: email.toLowerCase().trim(),
-          token, // Just the token, no deep link
-          hospital_id: user?.hospital_id,
-          role: 'doctor',
-          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-          is_used: false
-        },
-      ])
-      .select()
-      .single();
+    setLoading(true);
+    try {
+      // Generate a secure token
+      const token = Crypto.randomUUID();
 
-    if (error) throw error;
+      // Insert invitation
+      const { data, error } = await supabase
+        .from('invitations')
+        .insert([
+          {
+            email: email.toLowerCase().trim(),
+            token,
+            hospital_id: user?.hospital_id,
+            role: role, // ← Use the role prop
+            expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+            is_used: false
+          },
+        ])
+        .select()
+        .single();
 
-    // Just set the token for display, not a deep link
-    setInviteLink(token); // Changed from generatedLink to just token
+      if (error) throw error;
 
-    // Auto-open email client with just the token
-    const emailSent = await sendEmailManually(
-      email, 
-      token, // Just the token
-      hospitalInfo?.name || 'Our Hospital'
-    );
+      // Just set the token for display, not a deep link
+      setInviteLink(token);
 
-    // ... rest of your code ...
-  } catch (err: any) {
-    // ... error handling ...
-  } finally {
-    setLoading(false);
-  }
-};
+      // Auto-open email client with just the token
+      const emailSent = await sendEmailManually(
+        email, 
+        token,
+        hospitalInfo?.name || 'Our Hospital'
+      );
+
+      if (emailSent) {
+        Alert.alert(
+          '✅ Invitation Sent!',
+          `The invitation has been sent to ${email}. They will receive an email with the token.`,
+          [{ text: 'OK' }]
+        );
+      }
+
+      // Clear the email field
+      setEmail('');
+    } catch (err: any) {
+      console.error('Invitation error:', err);
+      
+      if (err.code === '23505') {
+        Alert.alert(
+          'Invitation Already Sent',
+          `An invitation has already been sent to ${email}. Please wait for them to complete registration or try a different email.`
+        );
+      } else {
+        Alert.alert(
+          'Error',
+          err.message || 'Failed to send invitation. Please try again.'
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <KeyboardAvoidingView 
@@ -192,9 +237,9 @@ MedAssistant Team
         {/* Header */}
         <View style={styles.header}>
           <Ionicons name="person-add" size={32} color="#4361EE" />
-          <Text style={[styles.title, { color: colors.text }]}>Invite Doctor</Text>
+          <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
           <Text style={styles.subtitle}>
-            Send an invitation to a doctor to join your hospital
+            {subtitle}
           </Text>
         </View>
 
@@ -238,12 +283,12 @@ MedAssistant Team
           {/* Email Input */}
           <View style={styles.inputGroup}>
             <Text style={styles.label}>
-              Doctor's Email <Text style={styles.required}>*</Text>
+              {userType === 'admin' ? 'Administrator' : 'Doctor'}'s Email <Text style={styles.required}>*</Text>
             </Text>
             <View style={styles.inputContainer}>
               <Ionicons name="mail" size={20} color="#666" style={styles.inputIcon} />
               <TextInput
-                placeholder="doctor@hospital.com"
+                placeholder={userType === 'admin' ? "admin@hospital.com" : "doctor@hospital.com"}
                 value={email}
                 onChangeText={setEmail}
                 style={styles.input}
@@ -279,7 +324,7 @@ MedAssistant Team
             <View style={styles.linkContainer}>
               <Text style={styles.linkLabel}>🎉 Invitation Created!</Text>
               <Text style={styles.linkDescription}>
-                Share this token with the doctor:
+                Share this token with the {userType}:
               </Text>
               
               <TouchableOpacity 
@@ -287,7 +332,7 @@ MedAssistant Team
                 onPress={copyInviteLink}
               >
                 <Text style={styles.linkText} numberOfLines={1}>
-                  {inviteLink} {/* This should now be just the token */}
+                  {inviteLink}
                 </Text>
                 <View style={styles.copyBadge}>
                   <Ionicons name="copy" size={14} color="#4361EE" />
@@ -296,7 +341,7 @@ MedAssistant Team
               </TouchableOpacity>
               
               <Text style={styles.tokenInstructions}>
-                Doctor should enter this token in the app when signing up
+                {userType === 'admin' ? 'Administrator' : 'Doctor'} should enter this token in the app when signing up
               </Text>
               
               <View style={styles.linkMetadata}>
@@ -306,7 +351,9 @@ MedAssistant Team
                 </View>
                 <View style={styles.metadataItem}>
                   <Ionicons name="shield-checkmark" size={14} color="#666" />
-                  <Text style={styles.metadataText}>Doctor role assigned</Text>
+                  <Text style={styles.metadataText}>
+                    {userType === 'admin' ? 'Administrator' : 'Doctor'} role assigned
+                  </Text>
                 </View>
               </View>
             </View>
@@ -338,6 +385,7 @@ MedAssistant Team
     </KeyboardAvoidingView>
   );
 }
+
 
 const styles = StyleSheet.create({
   container: {

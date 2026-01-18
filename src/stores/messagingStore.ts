@@ -1,178 +1,266 @@
 // stores/messagingStore.ts
 import { create } from 'zustand';
-import { ChatMessage, filterMessagesByConversation } from '../models/ChatMessage';
+import { ChatMessage } from '../models/ChatMessage';
 import { chatService } from '../Services/chatService';
+import { Conversation } from '../models/Conversation';
 
 interface MessagingState {
   messages: ChatMessage[];
-  conversations: any[]; // Future support for inbox list
+  conversations: Conversation[];
   loading: boolean;
+  loadingMore: boolean; // Added
+  hasMore: boolean; // Added
   error: string | null;
   currentConversationId: string | null;
+  currentConversation: Conversation | null;
   unsubscribe: (() => void) | null;
 
-  // Actions
-  setMessages: (messages: ChatMessage[]) => void;
+  // Core actions
   addMessage: (message: ChatMessage) => void;
-  updateMessage: (messageId: string, updates: Partial<ChatMessage>) => void;
-  removeMessage: (messageId: string) => void;
-  setLoading: (loading: boolean) => void;
-  setError: (error: string | null) => void;
-  clearMessages: () => void;
-  clearConversationMessages: (conversationId: string) => void; // ✅ ADDED: Clear specific conversation
+  updateMessage: (id: string, updates: Partial<ChatMessage>) => void;
+  
+  // NEW: Set current conversation
+  setCurrentConversation: (conversation: Conversation) => void;
 
-  // Conversations
-  setConversations: (conversations: any[]) => void;
-  loadConversations: (userId: string) => Promise<void>;
+  // Delete / Restore
+  deleteMessage: (id: string) => void;
+  restoreMessage: (id: string) => void;
 
-  // ChatService integration
+  // Loaders
   loadMessages: (conversationId: string, userId: string) => Promise<void>;
   sendMessage: (conversationId: string, userId: string, text: string) => Promise<void>;
   subscribeToMessages: (conversationId: string, userId: string) => () => void;
 
-  // ✅ ADDED: Get messages for specific conversation
+  setLoading: (loading: boolean) => void;
+
+  // Conversations
+  loadConversations: (userId: string, refresh?: boolean) => Promise<void>;
+  loadMoreConversations: (userId: string) => Promise<void>; // Added
+  setConversations: (conversations: Conversation[]) => void;
+  setHasMore: (hasMore: boolean) => void; // Added
+
+  // Selectors
   getMessagesForConversation: (conversationId: string) => ChatMessage[];
+
+  // Utils
+  clearConversationMessages: (conversationId: string) => void;
+  clearAllMessages: () => void;
 }
 
 export const useMessagingStore = create<MessagingState>((set, get) => ({
   messages: [],
   conversations: [],
   loading: false,
+  loadingMore: false, // Added
+  hasMore: true, // Added - assume there's more initially
   error: null,
   currentConversationId: null,
+  currentConversation: null,
   unsubscribe: null,
 
-  setMessages: (messages) => set({ messages }),
-  
-  addMessage: (message) => set((state) => ({
-    messages: [...state.messages, message],
-  })),
-  
-  updateMessage: (messageId, updates) =>
-    set((state) => ({
-      messages: state.messages.map((msg) =>
-        msg.id === messageId ? { ...msg, ...updates } : msg
+  /* ---------------------------------- */
+  /* Core message handling              */
+  /* ---------------------------------- */
+
+  addMessage: (message) => {
+    const exists = get().messages.some(m => m.id === message.id);
+    if (exists) return;
+
+    set(state => ({
+      messages: [...state.messages, message],
+    }));
+  },
+
+  updateMessage: (id, updates) =>
+    set(state => ({
+      messages: state.messages.map(msg =>
+        msg.id === id ? { ...msg, ...updates } : msg
       ),
     })),
-    
-  removeMessage: (messageId) =>
-    set((state) => ({
-      messages: state.messages.filter((msg) => msg.id !== messageId),
+
+  // NEW: Set current conversation
+  setCurrentConversation: (conversation) =>
+    set({
+      currentConversation: conversation,
+      currentConversationId: conversation.id
+    }),
+
+  /* ---------------------------------- */
+  /* Delete / Restore (MODE AWARE)       */
+  /* ---------------------------------- */
+
+  deleteMessage: (id) =>
+    set(state => ({
+      messages: state.messages
+        .map(msg => {
+          if (msg.id !== id) return msg;
+
+          // AI → soft delete
+          if (msg.mode === 'ai') {
+            return { ...msg, isDeleted: true };
+          }
+
+          // Doctor → hard delete
+          return null;
+        })
+        .filter(Boolean) as ChatMessage[],
     })),
-    
-  setLoading: (loading) => set({ loading }),
-  setError: (error) => set({ error }),
-  
-  clearMessages: () => set({ messages: [] }),
-  
-  // ✅ ADDED: Clear only messages from specific conversation
-  clearConversationMessages: (conversationId: string) =>
-    set((state) => ({
-      messages: state.messages.filter((msg) => msg.conversationId !== conversationId),
+
+  restoreMessage: (id) =>
+    set(state => ({
+      messages: state.messages.map(msg =>
+        msg.id === id && msg.mode === 'ai'
+          ? { ...msg, isDeleted: false }
+          : msg
+      ),
     })),
 
-  setConversations: (conversations) => set({ conversations }),
+  /* ---------------------------------- */
+  /* Loaders                            */
+  /* ---------------------------------- */
 
-  loadConversations: async (userId: string) => {
-    const { setLoading, setError, setConversations } = get();
-    try {
-      setLoading(true);
-      const conversations = await chatService.getConversations(userId);
-      setConversations(conversations);
-    } catch (error) {
-      console.error('Failed to load conversations:', error);
-      setError('Failed to load conversations');
-    } finally {
-      setLoading(false);
-    }
-  },
-
-  loadMessages: async (conversationId: string, userId: string) => {
-    const { setLoading, setMessages, setError, clearConversationMessages } = get();
+  loadMessages: async (conversationId, userId) => {
+    set({ loading: true, error: null });
 
     try {
-      setLoading(true);
-      setError(null);
-
-      // ✅ CLEAR existing messages for this conversation first
-      clearConversationMessages(conversationId);
-
       const messages = await chatService.loadMessages(conversationId, userId);
-      
-      // ✅ ADD conversationId to each message
-      const messagesWithConversationId = messages.map(msg => ({
+
+      const typedMessages: ChatMessage[] = messages.map(msg => ({
         ...msg,
-        conversationId: conversationId,
+        mode: (msg as any).mode || 'ai', // Provide default mode
+        isDeleted: (msg as any).isDeleted || false,
       }));
       
-      setMessages(messagesWithConversationId);
-      set({ currentConversationId: conversationId });
-    } catch (error) {
-      console.error('Failed to load messages:', error);
-      setError('Failed to load messages');
+      set(state => ({
+        messages: [
+          ...state.messages.filter(m => m.conversationId !== conversationId),
+          ...typedMessages,
+        ],
+        currentConversationId: conversationId,
+      }));
+    } catch (err) {
+      console.error('Failed to load messages:', err);
+      set({ error: 'Failed to load messages' });
     } finally {
-      setLoading(false);
+      set({ loading: false });
     }
   },
 
-  sendMessage: async (conversationId: string, userId: string, text: string) => {
-    const { addMessage, setError } = get();
-
-    // Optimistic message with conversationId
-    const optimisticMsg: ChatMessage = {
+  sendMessage: async (conversationId, userId, text) => {
+    const optimistic: ChatMessage = {
       id: `temp-${Date.now()}`,
-      text: text,
+      text,
       isUser: true,
       timestamp: new Date(),
-      conversationId: conversationId, // ✅ ADDED: Include conversationId
+      conversationId,
+      mode: 'doctor',
+      isDeleted: false,
     };
-    addMessage(optimisticMsg);
+
+    get().addMessage(optimistic);
 
     try {
       await chatService.sendMessage(conversationId, userId, text);
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      setError('Failed to send message');
+    } catch (err) {
+      console.error('Send failed:', err);
+      set({ error: 'Failed to send message' });
     }
   },
 
-  subscribeToMessages: (conversationId: string, userId: string) => {
-    const { addMessage, updateMessage, unsubscribe } = get();
+  setLoading: (loading) => set({ loading }),
 
-    // Clean up existing subscription
-    if (unsubscribe) unsubscribe();
+  subscribeToMessages: (conversationId, userId) => {
+    if (get().unsubscribe) get().unsubscribe!();
 
-    const unsubscribeFn = chatService.subscribeToConversation(
+    const unsub = chatService.subscribeToConversation(
       conversationId,
       userId,
-      (newMessage: ChatMessage) => {
-        const existingIndex = get().messages.findIndex(
-          (msg) => msg.id === newMessage.id || msg.id === `temp-${newMessage.id}`
-        );
-
-        if (existingIndex >= 0) {
-          updateMessage(get().messages[existingIndex].id, newMessage);
-        } else {
-          // ✅ ADD conversationId to incoming real-time messages
-          const messageWithConversationId = {
-            ...newMessage,
-            conversationId: conversationId,
-          };
-          addMessage(messageWithConversationId);
-        }
-      }
+      (msg: ChatMessage) => get().addMessage(msg)
     );
 
-    set({ unsubscribe: unsubscribeFn });
+    set({ unsubscribe: unsub });
     return () => {
-      unsubscribeFn();
+      unsub();
       set({ unsubscribe: null });
     };
   },
 
-  // ✅ ADDED: Get filtered messages for specific conversation
-  getMessagesForConversation: (conversationId: string) => {
-    const { messages } = get();
-    return filterMessagesByConversation(messages, conversationId);
+  /* ---------------------------------- */
+  /* Conversations                      */
+  /* ---------------------------------- */
+
+  setConversations: (conversations) => set({ conversations }),
+
+  setHasMore: (hasMore) => set({ hasMore }),
+
+  loadConversations: async (userId, refresh = false) => {
+    try {
+      set({ loading: true });
+      
+      // For now, we'll load all conversations at once
+      // In a real app, you'd implement pagination in chatService
+      const convos = await chatService.getConversations(userId);
+      
+      set({ 
+        conversations: convos,
+        hasMore: false, // Since we're loading all at once
+        loading: false 
+      });
+    } catch (err) {
+      console.error(err);
+      set({ 
+        error: 'Failed to load conversations',
+        loading: false 
+      });
+    }
   },
+
+  loadMoreConversations: async (userId) => {
+    const { conversations, hasMore, loadingMore } = get();
+    
+    if (!hasMore || loadingMore) return;
+
+    try {
+      set({ loadingMore: true });
+      
+      // In a real implementation, you'd fetch next page
+      // For now, we'll simulate loading more
+      setTimeout(() => {
+        // This is where you'd call chatService.getConversations with pagination
+        set({ 
+          loadingMore: false,
+          hasMore: false // Set to false since we're loading all at once
+        });
+      }, 1000);
+      
+    } catch (err) {
+      console.error('Failed to load more conversations:', err);
+      set({ 
+        loadingMore: false,
+        error: 'Failed to load more conversations'
+      });
+    }
+  },
+
+  /* ---------------------------------- */
+  /* Selectors                          */
+  /* ---------------------------------- */
+
+  getMessagesForConversation: (conversationId) =>
+    get().messages.filter(
+      msg =>
+        msg.conversationId === conversationId &&
+        !msg.isDeleted
+    ),
+
+  /* ---------------------------------- */
+  /* Utils                              */
+  /* ---------------------------------- */
+
+  clearConversationMessages: (conversationId) =>
+    set(state => ({
+      messages: state.messages.filter(m => m.conversationId !== conversationId),
+    })),
+
+  clearAllMessages: () => set({ messages: [] }),
 }));

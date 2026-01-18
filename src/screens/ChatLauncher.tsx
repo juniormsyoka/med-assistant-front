@@ -5,17 +5,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { fetchUserProfile } from '@/Services/authService';
 import { getPatientDoctor } from '@/Services/patientService';
 import { ActivityIndicator } from 'react-native-paper';
-import { chatService } from '@/Services/chatService'; // ✅ import chatService
-
+import { chatService } from '@/Services/chatService';
 import { useTheme } from '@react-navigation/native';
 
-// Define the route params type
+import { toast } from '../Services/toastService';
+
+// Route params type
 type ChatLauncherRouteParams = {
   doctorAssigned?: boolean;
   doctorId?: string;
   doctorName?: string;
 };
-
 type ChatLauncherRouteProp = RouteProp<{ params: ChatLauncherRouteParams }, 'params'>;
 
 const ChatLauncher: React.FC = () => {
@@ -26,41 +26,39 @@ const ChatLauncher: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const { colors } = useTheme();
 
-
   useEffect(() => {
     loadUserData();
+  }, []);
 
-    // Check for params from onboarding
-    const params = route.params;
-    if (params?.doctorAssigned && params.doctorId && params.doctorName) {
-      Alert.alert(
-        'Success!',
-        `You've been assigned to Dr. ${params.doctorName}. You can now start chatting!`,
-        [
-          { 
-            text: 'Start Chatting', 
-            onPress: () => handleDoctorChatDirect(params.doctorId!) 
-          },
-          { 
-            text: 'Later', 
-            style: 'cancel' 
-          }
-        ]
-      );
-    }
-  }, [route.params]);
-
+  // Load patient profile and doctor assignment
   const loadUserData = async () => {
+    setLoading(true);
     try {
       const profile = await fetchUserProfile();
       setUserProfile(profile);
 
       if (profile?.id && profile.role === 'patient') {
-        try {
-          const doctorData = await getPatientDoctor(profile.id);
-          setAssignedDoctor(doctorData);
-        } catch {
-          setAssignedDoctor(null);
+        const doctorData = await getPatientDoctor(profile.id);
+        setAssignedDoctor(doctorData);
+
+        // Redirect to onboarding if no doctor assigned
+        if (!doctorData) {
+          navigation.replace('Onboarding');
+          return;
+        }
+
+        // Alert if doctor is assigned but verification pending
+        if (doctorData.status === 'pending' && !doctorData.is_verified) {
+          toast.info(
+            "Pending Verification, Dr. ${doctorData.doctor?.full_name} will need to verify you before you can chat."  
+            );
+        }
+
+        // Alert if doctor has verified patient
+        if (doctorData.is_verified && doctorData.verified_at) {
+          toast.success(
+            "Verified!,Dr. ${doctorData.doctor?.full_name} has verified you. You can now start chatting!"            
+          );
         }
       }
     } catch (error) {
@@ -70,8 +68,8 @@ const ChatLauncher: React.FC = () => {
     }
   };
 
-  // ✅ Use chatService to get real conversation UUID
-  /*const handleDoctorChatDirect = async (doctorId: string) => {
+  // Open doctor chat (creates conversation if needed)
+  const handleDoctorChatDirect = async (doctorId: string) => {
     if (!userProfile?.id) return;
 
     try {
@@ -83,53 +81,18 @@ const ChatLauncher: React.FC = () => {
       navigation.navigate('ChatRoom', {
         mode: 'doctor',
         adapter: 'DoctorAdapter',
-        conversationId, // ✅ real UUID
+        conversationId,
         userRole: 'patient',
         userId: userProfile.id,
         assignedDoctorId: doctorId,
       });
     } catch (error) {
       console.error('Failed to get conversation UUID:', error);
-      Alert.alert('Error', 'Unable to open chat. Try again later.');
+      Alert.alert('Error', 'Unable to open doctor chat. Try again later.');
     }
-  }; */
+  };
 
-const handleDoctorChatDirect = async (doctorId: string) => {
-  if (!userProfile?.id) return;
-
-  try {
-    console.log('🚀 Starting DOCTOR chat with:', {
-      patientId: userProfile.id,
-      doctorId: doctorId
-    });
-
-    const conversationId = await chatService.getOrCreateConversation(
-      userProfile.id,
-      doctorId
-    );
-
-    console.log('🎯 Navigating to DOCTOR ChatRoom with:', {
-      mode: 'doctor',
-      conversationId,
-      userRole: 'patient',
-      userId: userProfile.id,
-      assignedDoctorId: doctorId
-    });
-
-    navigation.navigate('ChatRoom', {
-      mode: 'doctor', // ← THIS MUST BE 'doctor'
-      adapter: 'DoctorAdapter',
-      conversationId,
-      userRole: 'patient',
-      userId: userProfile.id,
-      assignedDoctorId: doctorId,
-    });
-  } catch (error) {
-    console.error('Failed to get conversation UUID:', error);
-    Alert.alert('Error', 'Unable to open doctor chat. Try again later.');
-  }
-};
-
+  // Handle doctor chat button
   const handleDoctorChat = async () => {
     if (!assignedDoctor?.doctor_id) {
       Alert.alert(
@@ -143,9 +106,19 @@ const handleDoctorChatDirect = async (doctorId: string) => {
       return;
     }
 
+    // Block chat if doctor hasn't verified patient yet
+    if (!assignedDoctor.is_verified) {
+      Alert.alert(
+        'Waiting for Doctor Approval',
+        'Your doctor has not yet verified you. You will be able to chat once they approve your request.'
+      );
+      return;
+    }
+
     await handleDoctorChatDirect(assignedDoctor.doctor_id);
   };
 
+  // AI chat
   const handleAIChat = () => {
     navigation.navigate('ChatRoom', {
       mode: 'ai',
@@ -202,9 +175,9 @@ const handleDoctorChatDirect = async (doctorId: string) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: '#f8f9fa' },
-  header: { fontSize: 24, fontWeight: '700', marginBottom: 32, color: '#333' },
-  loadingText: { marginTop: 12, color: '#666', fontSize: 16 },
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  header: { fontSize: 24, fontWeight: '700', marginBottom: 32 },
+  loadingText: { marginTop: 12, fontSize: 16 },
   option: { width: '90%', paddingVertical: 18, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   optionText: { color: '#fff', fontSize: 17, fontWeight: '600', marginLeft: 10 },
   infoBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#E8F5E8', padding: 12, borderRadius: 8, marginTop: 16, borderLeftWidth: 4, borderLeftColor: '#4CAF50', width: '90%' },

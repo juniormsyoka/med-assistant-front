@@ -22,6 +22,8 @@ interface ChatInputBarProps {
   disabled?: boolean;
   placeholder?: string;
   chatMode?: "ai" | "doctor";
+   showScanButton?: boolean; 
+  showVoiceButton?: boolean;
 }
 
 // Recording options optimized for Gemini compatibility with web support

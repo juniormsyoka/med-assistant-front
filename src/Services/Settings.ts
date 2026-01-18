@@ -470,10 +470,42 @@ class SettingsService {
     return !!this.currentProfile?.profilePicture;
   }
 
-  clearCache(): void {
+ /* clearCache(): void {
     this.currentProfile = null;
     this.isOnline = true;
+  }*/
+
+ async clearCache(): Promise<void> {
+  try {
+    // Save profile picture path before clearing
+    const profilePicturePath = this.currentProfile?.profilePicture;
+    
+    // Clear persistent storage
+    await AsyncStorage.removeItem('userProfile');
+    
+    // Delete local profile picture file if exists
+    if (
+      profilePicturePath &&
+      typeof profilePicturePath === "string" &&
+      profilePicturePath.startsWith(FileSystem.documentDirectory!)
+    ) {
+      try {
+        await FileSystem.deleteAsync(profilePicturePath);
+      } catch (fileError) {
+        console.warn('Error deleting profile picture file:', fileError);
+      }
+    }
+    
+    // Clear in-memory cache
+    this.currentProfile = null;
+    this.isOnline = true;
+    
+    console.log('All user data cleared successfully');
+  } catch (error) {
+    console.error('Error clearing user data:', error);
+    throw error;
   }
+}
 }
 
 export const settingsService = new SettingsService();

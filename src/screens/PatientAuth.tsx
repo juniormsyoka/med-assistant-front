@@ -114,13 +114,8 @@ export default function PatientAuthScreen() {
           }
         }
       } else {
-        // Login (same for both)
-      //  console.log('🔐 [UI] Starting login process...');
         const result = await signInUser(email, password);
-     /*   console.log('✅ [UI] Login successful:', {
-          role: result.role,
-          email: result.user.email
-        });*/
+     
         await navigateByRole();
         const roleMessage = getRoleWelcomeMessage(result.role);
         toast.success(roleMessage);
@@ -305,7 +300,7 @@ export default function PatientAuthScreen() {
 
       <TouchableOpacity
         onPress={() => {
-          console.log('🔄 [UI] Switching mode from', mode, 'to', mode === 'signup' ? 'login' : 'signup');
+       //   console.log('🔄 [UI] Switching mode from', mode, 'to', mode === 'signup' ? 'login' : 'signup');
           setMode(mode === 'signup' ? 'login' : 'signup');
           setIsDoctorSignup(false); // Reset doctor mode when switching
           setInvitationToken(''); // Clear token

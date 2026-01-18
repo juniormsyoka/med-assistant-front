@@ -7,6 +7,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Refill, CreateRefill } from "../models/Refill";
 import * as FileSystem from "expo-file-system/legacy";
 
+
+//import { recordMedicationAction } from './notifications';
+import { ComplianceTracker } from '../Services/ComplianceTracker';
 // Async DB handle
 let db: SQLite.SQLiteDatabase | null = null;
 const USER_PROFILE_KEY = 'user_profile';
@@ -225,6 +228,8 @@ export const deleteMedication = async (id: number): Promise<void> => {
 //
 // Log operations
 //
+// In storage.ts - UPDATED addLogEntry function:
+
 export const addLogEntry = async (log: CreateLogEntry): Promise<number> => {
   if (!db) throw new Error("Database not initialized");
 
@@ -244,10 +249,87 @@ export const addLogEntry = async (log: CreateLogEntry): Promise<number> => {
       ]
     );
 
+    // 1. Update medication status (your existing code)
     await updateMedicationStatus(
       log.medicationId,
-      log.status === "refilled" ? "taken" : log.status as "active" | "taken" | "missed" | "snoozed" | "skipped" | "late" | "rescheduled" | "paused"
+      log.status === "refilled" ? "taken" : log.status as any
     );
+
+    // ====================================================
+    // 2. NEW: COMPLIANCE TRACKING INTEGRATION
+    // ====================================================
+    try {
+      // Get the medication details
+      const medication = await getMedicationById(log.medicationId);
+      
+      if (medication) {
+        // Map LogStatus to ComplianceAction
+        type LogStatus = 'taken' | 'missed' | 'snoozed' | 'skipped' | 'late' | 'rescheduled' | 'active' | 'paused' | 'refilled' | 'attended' | 'missedAttendance';
+        type ComplianceAction = 'taken' | 'missed' | 'snoozed' | 'skipped' | 'late';
+        
+        const statusMap: Record<LogStatus, ComplianceAction> = {
+          'taken': 'taken',
+          'missed': 'missed',
+          'snoozed': 'snoozed',
+          'skipped': 'skipped',
+          'late': 'late',
+          'rescheduled': 'missed',
+          'active': 'taken',
+          'paused': 'skipped',
+          'refilled': 'taken',
+          'attended': 'taken',
+          'missedAttendance': 'missed'
+        };
+        
+        const complianceAction = statusMap[log.status as LogStatus];
+        
+        // Determine which reminder offset was used
+        const reminderOffsetUsed = medication.reminderMinutes?.length 
+          ? Math.min(...medication.reminderMinutes)
+          : 60; // Default 60 minutes
+        
+        // Get battery level for context
+        let batteryLevel: number | undefined;
+        try {
+          // Dynamic import to avoid loading if not needed
+          const batteryModule = await import('expo-battery');
+          const batteryPercent = await batteryModule.getBatteryLevelAsync();
+          batteryLevel = Math.round(batteryPercent * 100);
+        } catch (e) {
+          console.log('Battery level not available:', e);
+        }
+        
+        // Prepare context with proper types
+        const context: {
+          location?: 'home' | 'work' | 'traveling' | 'other';
+          mood?: 'good' | 'ok' | 'bad' | 'stressed' | 'busy';
+          batteryLevel?: number;
+          skippedReason?: string;
+        } = {};
+        
+        // Add battery level if available
+        if (batteryLevel !== undefined) {
+          context.batteryLevel = batteryLevel;
+        }
+        
+        // Record compliance data
+        await ComplianceTracker.recordMedicationAction(
+          log.medicationId,
+          log.medicationName,
+          new Date(log.scheduledTime),
+          reminderOffsetUsed,
+          complianceAction,
+          log.actualTime ? new Date(log.actualTime) : undefined,
+          context
+        );
+        
+        console.log('📊 Compliance tracked:', log.medicationName, complianceAction);
+      }
+    } catch (complianceError) {
+      // Don't let compliance tracking failure break the main log entry
+      console.warn('⚠️ Compliance tracking failed:', complianceError);
+    }
+    // ====================================================
 
     await db.execAsync("COMMIT;");
     
@@ -657,6 +739,7 @@ export const saveMessageFromSupabase = async (message: {
   id: string;
   conversationId: string;
   senderId: string;
+  sender:string;
   text: string;
   createdAt: string;
 }) => {
@@ -740,6 +823,22 @@ export const resetMessagesTable = async () => {
     console.error('Failed to reset messages table:', error);
   }
 };
+
+// Services/storage.ts (add this function)
+export async function updateMessageLocal(
+  messageId: string, 
+  updates: { text?: string; synced?: number }
+): Promise<void> {
+  try {
+    await AsyncStorage.setItem(
+      `message_${messageId}`,
+      JSON.stringify(updates)
+    );
+    console.log('✅ Message updated locally:', messageId);
+  } catch (error) {
+    console.error('❌ Failed to update message locally:', error);
+  }
+}
 
 // Export the LocalMessage type for use in other files
 export type { LocalMessage };

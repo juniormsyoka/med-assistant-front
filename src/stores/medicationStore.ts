@@ -1,6 +1,7 @@
 // stores/medicationStore.ts - Fully Reactive Version
 import { create } from 'zustand';
 import { Medication } from '../models/Medication';
+import { LogStatus } from '../models/LogEntry';
 import * as Notifications from 'expo-notifications';
 import {
   getMedications,
@@ -11,7 +12,9 @@ import {
 import {
   NotificationService
 } from '../Services/notifications';
+import { MedicationActionService } from '../Services/centalizedMedicalStatus/MedicationActionService';
 import { updateRefillSupply } from '../Services/storage';
+import { ComplianceTracker } from '../Services/ComplianceTracker';
 
 // ------------------------------
 // Type-safe Actions
@@ -30,6 +33,18 @@ interface ScheduledNotification {
   type: 'medication' | 'snooze';
 }
 
+// Type for allowed medication status (matching Medication model)
+type AllowedMedicationStatus = 
+  | "taken" 
+  | "missed" 
+  | "snoozed" 
+  | "skipped" 
+  | "late" 
+  | "rescheduled" 
+  | "active" 
+  | "paused" 
+  | undefined;
+
 // ------------------------------
 // Store State
 // ------------------------------
@@ -45,7 +60,7 @@ interface MedicationState {
   medicationToDelete: Medication | null;
 
   scheduledNotifications: ScheduledNotification[];
-  dueMedications: Medication[]; // ✅ Medications with pending reminders
+  dueMedications: Medication[];
 
   refresh: () => Promise<void>;
   handleAction: (action: MedicationAction) => Promise<void>;
@@ -53,11 +68,18 @@ interface MedicationState {
   confirmDelete: () => Promise<void>;
   cancelDelete: () => void;
   clearError: () => void;
-  updateMedicationStatus: (medicationId: number, status: Medication['status']) => Promise<boolean>;
+  updateMedicationStatus: (medicationId: number, status: AllowedMedicationStatus) => Promise<boolean>;
 
   scheduleMedicationReminder: (medication: Medication) => Promise<void>;
   cancelMedicationNotification: (medicationId: string) => Promise<void>;
   rescheduleAllMedications: () => Promise<void>;
+
+  getComplianceInsights: (medicationId: number) => Promise<{
+    complianceRate: number;
+    avgResponseTime?: number;
+    mostEffectiveOffset?: number;
+    totalRecords: number;
+  }>;
 }
 
 // ------------------------------
@@ -73,13 +95,34 @@ export const useMedicationStore = create<MedicationState>((set, get) => {
     const now = new Date();
 
     const dueMedIds = allNotifications
-        .filter(n => n.content.data?.type === 'medication' || n.content.data?.type === 'snooze')
-        .filter(n => (n.trigger as any)?.date && new Date((n.trigger as any)?.date) <= now)
-        .map(n => n.content.data?.medicationId);
+      .filter(n => n.content.data?.type === 'medication' || n.content.data?.type === 'snooze')
+      .filter(n => (n.trigger as any)?.date && new Date((n.trigger as any)?.date) <= now)
+      .map(n => n.content.data?.medicationId);
 
     set(state => ({
       dueMedications: state.medications.filter(m => m.id && dueMedIds.includes(m.id.toString()))
     }));
+  };
+
+  // ------------------------------
+  // Helper: Convert LogStatus to allowed medication status
+  // ------------------------------
+  const convertToAllowedStatus = (status: LogStatus): AllowedMedicationStatus => {
+    const statusMap: Record<string, AllowedMedicationStatus> = {
+      "taken": "taken",
+      "missed": "missed",
+      "snoozed": "snoozed",
+      "skipped": "skipped",
+      "late": "late",
+      "rescheduled": "rescheduled",
+      "active": "active",
+      "paused": "paused",
+      "refilled": "taken",
+      "attended": "taken",
+      "missedAttendance": "missed",
+    };
+    
+    return statusMap[status] || "active";
   };
 
   // ------------------------------
@@ -89,20 +132,19 @@ export const useMedicationStore = create<MedicationState>((set, get) => {
     const medId = response.notification.request.content.data.medicationId;
     const medication = get().medications.find(m => m.id?.toString() === medId);
     if (medication) {
-      // Open reminder modal automatically
       set({ activeMedication: medication, reminderVisible: true });
     }
-    // Refresh dueMedications
     await updateDueMedications();
   });
 
   Notifications.addNotificationReceivedListener((notification) => {
-  const medId = notification.request.content.data.medicationId;
-  const medication = get().medications.find(m => m.id?.toString() === medId);
-  if (medication) {
-    set({ activeMedication: medication, reminderVisible: true });
-  }
-});
+    const medId = notification.request.content.data.medicationId;
+    const medication = get().medications.find(m => m.id?.toString() === medId);
+    if (medication) {
+      set({ activeMedication: medication, reminderVisible: true });
+    }
+  });
+
   // ------------------------------
   return {
     medications: [],
@@ -123,10 +165,7 @@ export const useMedicationStore = create<MedicationState>((set, get) => {
         const fetched = await getMedications();
         set({ medications: fetched, refreshing: false });
 
-        // Reschedule all medications to ensure consistency
         await get().rescheduleAllMedications();
-
-        // Update due medications
         await updateDueMedications();
       } catch (err) {
         set({ error: "Failed to load medications", refreshing: false });
@@ -134,119 +173,97 @@ export const useMedicationStore = create<MedicationState>((set, get) => {
     },
 
     // ------------------------------
-   handleAction: async (action: MedicationAction) => {
-  try {
-    const { medication } = action;
-    switch (action.type) {
-      case 'delete':
-        set({ medicationToDelete: medication, deleteVisible: true });
-        break;
+    handleAction: async (action: MedicationAction) => {
+      try {
+        const { medication } = action;
+        
+        switch (action.type) {
+          case 'delete':
+            set({ medicationToDelete: medication, deleteVisible: true });
+            break;
 
-      case 'take':
-      case 'miss': {
-        await get().cancelMedicationNotification(medication.id!.toString());
-        const status = action.type === 'take' ? 'taken' : 'missed';
+          case 'take':
+          case 'miss':
+          case 'snooze':
+          case 'refill': {
+            // Delegate to MedicationActionService
+            const result = await MedicationActionService.handleAction(
+              medication,
+              action.type,
+              action.type === 'snooze' ? { minutes: action.data?.minutes } : 
+              action.type === 'refill' ? { quantity: action.quantity } : {}
+            );
 
-        await get().updateMedicationStatus(medication.id!, status);
+            if (result.success) {
+              // Convert LogStatus to allowed medication status
+              const allowedStatus = convertToAllowedStatus(result.status);
+              
+              // Update local state
+              set(state => ({
+                ...state,
+                medications: state.medications.map(m =>
+                  m.id === medication.id ? { 
+                    ...m, 
+                    status: allowedStatus,
+                    nextReminderAt: result.nextReminderAt || m.nextReminderAt
+                  } : m
+                ),
+                reminderVisible: false,
+                activeMedication: null
+              }));
+            } else {
+              set(state => ({
+                ...state,
+                error: result.message || `Failed to ${action.type} medication`
+              }));
+            }
+            break;
+          }
 
-        await addLogEntry({
-          medicationId: medication.id!,
-          medicationName: medication.name,
-          status,
-          scheduledTime: new Date().toISOString(),
-          actualTime: new Date().toISOString(),
-          dosage: medication.dosage,
-        });
-
-        if (
-          medication.repeatType !== 'daily' &&
-          medication.repeatType !== 'weekly' &&
-          medication.repeatType !== 'monthly'
-        ) {
-          await get().scheduleMedicationReminder(medication);
+          case 'reminder':
+            set({ activeMedication: medication, reminderVisible: true });
+            break;
         }
 
-        await get().refresh();
-        set({ reminderVisible: false, activeMedication: null });
-        break;
+        await updateDueMedications();
+      } catch (err) {
+        console.error('⚠️ handleAction failed:', err);
+        set(state => ({ ...state, error: `Failed to ${action.type} medication` }));
       }
-
-      case 'snooze': {
-        const minutes = action.data?.minutes || 15;
-        await get().cancelMedicationNotification(medication.id!.toString());
-
-        await NotificationService.scheduleMedicationReminder({
-          ...medication,
-          time: new Date(Date.now() + minutes * 60 * 1000).toISOString(),
-        });
-
-        await get().updateMedicationStatus(medication.id!, 'snoozed');
-
-        await addLogEntry({
-          medicationId: medication.id!,
-          medicationName: medication.name,
-          status: 'snoozed',
-          scheduledTime: new Date().toISOString(),
-          actualTime: new Date().toISOString(),
-          dosage: medication.dosage,
-          snoozeMinutes: minutes,
-        });
-
-        await get().refresh();
-        set({ reminderVisible: false, activeMedication: null });
-        break;
-      }
-
-      case 'reminder':
-        set({ activeMedication: medication, reminderVisible: true });
-        break;
-
-      case 'refill': {
-        const quantity = action.quantity || 0;
-
-        // Update supply in storage
-        if (medication.id != null) {
-          await updateRefillSupply(medication.id, quantity);
-        }
-
-        await addLogEntry({
-  medicationId: medication.id!,
-  medicationName: medication.name,
-  status: 'refilled',
-  scheduledTime: new Date().toISOString(),
-  actualTime: new Date().toISOString(),
-  dosage: quantity.toString(), // convert number to string
-});
-
-
-        // Optionally refresh store state
-        await get().refresh();
-
-        // Optionally close any active modals
-        set({ reminderVisible: false, activeMedication: null });
-        break;
-      }
-    }
-
-    // Update due medications after every action
-    await updateDueMedications();
-  } catch (err) {
-    console.error('⚠️ handleAction failed:', err);
-    set({ error: `Failed to ${action.type} medication` });
-  }
-},
-
+    },
 
     // ------------------------------
     scheduleMedicationReminder: async (medication: Medication) => {
       try {
         await NotificationService.scheduleMedicationReminder(medication);
+        
+        // Compliance tracking
+        try {
+          let targetTime = new Date();
+          if (medication.time.includes('T')) {
+            targetTime = new Date(medication.time);
+          } else {
+            const [hours, minutes] = medication.time.split(':').map(Number);
+            targetTime.setHours(hours, minutes, 0, 0);
+          }
+          
+          await ComplianceTracker.recordReminderScheduled(
+            medication.id!,
+            medication.name,
+            targetTime,
+            medication.reminderMinutes || [60, 30, 5]
+          );
+        } catch (trackingError) {
+          console.warn('⚠️ Failed to track reminder schedule:', trackingError);
+        }
+        
         await updateDueMedications();
       } catch (err) {
         console.error('❌ Failed to schedule reminder:', err);
       }
     },
 
+    // ------------------------------
     cancelMedicationNotification: async (medicationId: string) => {
       try {
         await NotificationService.cancelMedicationReminders(medicationId);
@@ -256,18 +273,50 @@ export const useMedicationStore = create<MedicationState>((set, get) => {
       }
     },
 
+    // ------------------------------
     rescheduleAllMedications: async () => {
       try {
         const { medications } = get();
         await NotificationService.rescheduleAllMedications(medications);
+        
+        // Compliance tracking for all medications
+        for (const med of medications) {
+          if (med.enabled) {
+            try {
+              let targetTime = new Date();
+              if (med.time.includes('T')) {
+                targetTime = new Date(med.time);
+              } else {
+                const [hours, minutes] = med.time.split(':').map(Number);
+                targetTime.setHours(hours, minutes, 0, 0);
+              }
+              
+              await ComplianceTracker.recordReminderScheduled(
+                med.id!,
+                med.name,
+                targetTime,
+                med.reminderMinutes || [60, 30, 5]
+              );
+            } catch (error) {
+              console.warn(`⚠️ Failed to track schedule for ${med.name}:`, error);
+            }
+          }
+        }
+        
         await updateDueMedications();
       } catch (err) {
         console.error('❌ Failed to reschedule medications:', err);
       }
     },
 
-    closeReminderModal: () => set({ reminderVisible: false, activeMedication: null }),
+    // ------------------------------
+    closeReminderModal: () => set(state => ({ 
+      ...state, 
+      reminderVisible: false, 
+      activeMedication: null 
+    })),
 
+    // ------------------------------
     confirmDelete: async () => {
       const { medicationToDelete, medications } = get();
       if (!medicationToDelete) return;
@@ -276,26 +325,36 @@ export const useMedicationStore = create<MedicationState>((set, get) => {
         await get().cancelMedicationNotification(medicationToDelete.id!.toString());
         await deleteMedication(medicationToDelete.id!);
 
-        set({
-          medications: medications.filter(m => m.id !== medicationToDelete.id),
+        set(state => ({
+          ...state,
+          medications: state.medications.filter(m => m.id !== medicationToDelete.id),
           deleteVisible: false,
           medicationToDelete: null,
-        });
+        }));
 
         await updateDueMedications();
       } catch (err) {
         console.error('❌ Failed to delete medication:', err);
-        set({ error: 'Failed to delete medication' });
+        set(state => ({ ...state, error: 'Failed to delete medication' }));
       }
     },
 
-    cancelDelete: () => set({ deleteVisible: false, medicationToDelete: null }),
-    clearError: () => set({ error: null }),
+    // ------------------------------
+    cancelDelete: () => set(state => ({ 
+      ...state, 
+      deleteVisible: false, 
+      medicationToDelete: null 
+    })),
 
+    // ------------------------------
+    clearError: () => set(state => ({ ...state, error: null })),
+
+    // ------------------------------
     updateMedicationStatus: async (medicationId, status) => {
       try {
         await updateMedicationStatusDB(medicationId, status);
         set(state => ({
+          ...state,
           medications: state.medications.map(m =>
             m.id === medicationId ? { ...m, status } : m
           ),
@@ -304,8 +363,21 @@ export const useMedicationStore = create<MedicationState>((set, get) => {
         return true;
       } catch (err) {
         console.error('❌ Failed to update medication status:', err);
-        set({ error: "Failed to update medication status" });
+        set(state => ({ ...state, error: "Failed to update medication status" }));
         return false;
+      }
+    },
+
+    // ------------------------------
+    getComplianceInsights: async (medicationId: number) => {
+      try {
+        return await ComplianceTracker.getComplianceStats(medicationId);
+      } catch (error) {
+        console.error('❌ Failed to get compliance insights:', error);
+        return {
+          complianceRate: 0,
+          totalRecords: 0
+        };
       }
     },
   };

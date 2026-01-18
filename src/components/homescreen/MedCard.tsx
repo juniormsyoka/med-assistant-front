@@ -1,11 +1,17 @@
-import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import React, { useState } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Medication } from "../../models/Medication";
 import { LogStatus } from "../../models/LogEntry";
+import { MedicationStatusService } from "../../Services/centalizedMedicalStatus/MedicationStatusService";
+import { ComplianceInsights } from "../../Services/centalizedMedicalStatus/ComplianceInsightsCalculator";
+import { ComplianceAction } from "../../Services/ComplianceTracker";
+import EditTakenMedicationModal from "../homescreen/EditTakenMedicationModal";
+
 
 interface MedCardProps {
   medication: Medication & { nextReminderAt?: string; status?: LogStatus };
+  complianceInsights?: ComplianceInsights;
   isDue?: boolean;
   onEdit?: () => void;
   onDelete?: () => void;
@@ -16,41 +22,50 @@ interface MedCardProps {
   onSkip?: () => Promise<void>;
   onReschedule?: (newTime: string) => Promise<void>;
   onOpenReminderActions?: () => void;
+  onDuplicate?: () => void; // New prop for duplication
 }
 
 const MedCard: React.FC<MedCardProps> = ({
   medication,
+  complianceInsights,
   isDue = false,
   onEdit,
   onDelete,
   onToggle,
   onOpenReminderActions,
+  onDuplicate,
 }) => {
-  const status = medication.status ?? (medication.enabled ? "active" : "paused");
 
-  const getStatusConfig = () => {
-    switch (status) {
-      case "taken":
-        return { label: "Taken", color: "#4CAF50", icon: "checkmark-circle", bgColor: "#E8F5E8" };
-      case "missed":
-        return { label: "Missed", color: "#FF3B30", icon: "close-circle", bgColor: "#FFEBEE" };
-      case "snoozed":
-        return { label: "Snoozed", color: "#FF9800", icon: "time", bgColor: "#FFF3E0" };
-      case "skipped":
-        return { label: "Skipped", color: "#9E9E9E", icon: "ban", bgColor: "#FAFAFA" };
-      case "late":
-        return { label: "Late", color: "#FF6B35", icon: "alert-circle", bgColor: "#FFF3E0" };
-      case "rescheduled":
-        return { label: "Rescheduled", color: "#9C27B0", icon: "calendar", bgColor: "#F3E5F5" };
-      case "active":
-        return { label: "Active", color: "#4361EE", icon: "play-circle", bgColor: "#EEF2FF" };
-      case "paused":
-      default:
-        return { label: "Paused", color: "#666", icon: "pause-circle", bgColor: "#F5F5F5" };
+  const [showEditTakenModal, setShowEditTakenModal] = useState(false);
+
+  // ✅ Use centralized service for status determination
+  const status = MedicationStatusService.getEffectiveStatus(medication, complianceInsights);
+  
+  // ✅ Use centralized service for status configuration
+  const statusConfig = MedicationStatusService.getStatusConfig(status);
+  const { label, color, icon, bgColor } = statusConfig;
+
+  // Determine if medication is taken
+  const isTaken = status === 'taken';
+  const takenTime = complianceInsights?.lastActionTime 
+    ? new Date(complianceInsights.lastActionTime) 
+    : null;
+  
+  // Format taken time for display
+  const formatTakenTime = () => {
+    if (!takenTime) return '';
+    const now = new Date();
+    const diffHours = Math.floor((now.getTime() - takenTime.getTime()) / (1000 * 60 * 60));
+    
+    if (diffHours < 1) {
+      const diffMinutes = Math.floor((now.getTime() - takenTime.getTime()) / (1000 * 60));
+      return `${diffMinutes} min ago`;
+    } else if (diffHours < 24) {
+      return `${diffHours} hr ago`;
+    } else {
+      return takenTime.toLocaleDateString([], { month: 'short', day: 'numeric' });
     }
   };
-
-  const { label, color, icon, bgColor } = getStatusConfig();
 
   const formatTime = (timeString: string) => {
     try {
@@ -63,23 +78,93 @@ const MedCard: React.FC<MedCardProps> = ({
     }
   };
 
+  // ✅ Centralized compliance percentage calculation
+  const getCompliancePercentage = () => {
+    if (!complianceInsights?.compliancePercentage) {
+      return null;
+    }
+    return complianceInsights.compliancePercentage;
+  };
+
+  const compliancePercentage = getCompliancePercentage();
+
+  // ✅ Use centralized date check
+  const isLastActionToday = () => {
+    return MedicationStatusService.isDateToday(complianceInsights?.lastActionTime);
+  };
+
+  // ✅ Get icon and color for last action
+  const getLastActionConfig = (action?: ComplianceAction) => {
+    switch (action) {
+      case 'taken':
+        return { icon: 'checkmark-circle' as const, color: '#4CAF50' };
+      case 'missed':
+        return { icon: 'close-circle' as const, color: '#FF3B30' };
+      case 'snoozed':
+        return { icon: 'time' as const, color: '#FF9800' };
+      case 'skipped':
+        return { icon: 'ban' as const, color: '#9E9E9E' };
+      case 'late':
+        return { icon: 'alert-circle' as const, color: '#FF6B35' };
+      default:
+        return { icon: 'time' as const, color: '#FF9800' };
+    }
+  };
+
+  // ✅ Get action label
+  const getLastActionLabel = (action?: ComplianceAction) => {
+    switch (action) {
+      case 'taken': return 'Taken';
+      case 'missed': return 'Missed';
+      case 'snoozed': return 'Snoozed';
+      case 'skipped': return 'Skipped';
+      case 'late': return 'Late';
+      default: return 'Snoozed';
+    }
+  };
+
+  const lastActionConfig = getLastActionConfig(complianceInsights?.lastAction);
+  const lastActionLabel = getLastActionLabel(complianceInsights?.lastAction);
+
+  // Handle edit press with warning for taken medications
+  const handleEditPress = () => {
+  if (!onEdit) return;
+
+  if (isTaken) {
+    setShowEditTakenModal(true);
+  } else {
+    onEdit();
+  }
+};
+
+
   return (
     <View
       style={[
         styles.card,
         !medication.enabled && styles.cardDisabled,
         isDue && styles.dueCard,
+        isTaken && styles.takenCard,
       ]}
-      // 🛡️ CRITICAL: Prevent modal from affecting this card's rendering
       pointerEvents="auto"
-      renderToHardwareTextureAndroid={true} // 🛡️ Force hardware rendering
+      renderToHardwareTextureAndroid={true}
     >
       <View style={[styles.statusIndicator, { backgroundColor: color }]} />
 
       <View style={styles.content}>
         <View style={styles.header}>
           <View style={styles.medInfo}>
-            <Text style={styles.name}>{medication.name}</Text>
+            <View style={styles.nameRow}>
+              <Text style={styles.name}>{medication.name}</Text>
+              {isTaken && (
+                <View style={styles.takenBadge}>
+                  <Ionicons name="checkmark-circle" size={12} color="#4CAF50" />
+                  <Text style={styles.takenBadgeText}>
+                    Taken{takenTime ? ` • ${formatTakenTime()}` : ''}
+                  </Text>
+                </View>
+              )}
+            </View>
             <View style={styles.detailsRow}>
               <View style={styles.detailChip}>
                 <Ionicons name="flask" size={12} color="#666" />
@@ -97,6 +182,54 @@ const MedCard: React.FC<MedCardProps> = ({
             <Text style={[styles.statusText, { color }]}>{label}</Text>
           </View>
         </View>
+
+        {/* Compliance Insights Section */}
+        {complianceInsights && complianceInsights.totalRecords && complianceInsights.totalRecords > 0 && (
+          <View style={styles.complianceSection}>
+            <View style={styles.complianceRow}>
+              <View style={styles.complianceBadge}>
+                <Ionicons name="stats-chart" size={12} color="#0284C7" />
+                <Text style={styles.complianceText}>
+                  {complianceInsights.takenCount || 0}/{complianceInsights.totalRecords} doses
+                </Text>
+              </View>
+              
+              {compliancePercentage !== null && (
+                <View style={[
+                  styles.compliancePercentageBadge,
+                  { 
+                    backgroundColor: compliancePercentage >= 80 ? '#DCFCE7' : 
+                    compliancePercentage >= 50 ? '#FEF9C3' : '#FEE2E2' 
+                  }
+                ]}>
+                  <Text style={[
+                    styles.compliancePercentageText,
+                    { 
+                      color: compliancePercentage >= 80 ? '#166534' : 
+                      compliancePercentage >= 50 ? '#854D0E' : '#991B1B' 
+                    }
+                  ]}>
+                    {compliancePercentage}% compliance
+                  </Text>
+                </View>
+              )}
+            </View>
+            
+            {/* Last Action Today Indicator */}
+            {isLastActionToday() && complianceInsights.lastAction && (
+              <View style={styles.lastActionRow}>
+                <Ionicons 
+                  name={lastActionConfig.icon} 
+                  size={12} 
+                  color={lastActionConfig.color} 
+                />
+                <Text style={styles.lastActionText}>
+                  {lastActionLabel} today
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
 
         {medication.nextReminderAt && (
           <View style={styles.reminderRow}>
@@ -117,7 +250,6 @@ const MedCard: React.FC<MedCardProps> = ({
             <TouchableOpacity
               style={styles.primaryAction}
               onPress={onOpenReminderActions}
-              // 🛡️ Prevent event propagation issues
               onPressIn={(e) => e.stopPropagation()}
             >
               <Ionicons name="notifications" size={16} color="#FFF" />
@@ -141,11 +273,15 @@ const MedCard: React.FC<MedCardProps> = ({
             )}
             {onEdit && (
               <TouchableOpacity 
-                onPress={onEdit} 
-                style={styles.iconButton}
+                onPress={handleEditPress} 
+                style={[styles.iconButton, isTaken && styles.editButtonTaken]}
                 onPressIn={(e) => e.stopPropagation()}
               >
-                <Ionicons name="create-outline" size={18} color="#666" />
+                <Ionicons 
+                  name={isTaken ? "document-text-outline" : "create-outline"} 
+                  size={18} 
+                  color={isTaken ? "#FF9800" : "#666"} 
+                />
               </TouchableOpacity>
             )}
             {onDelete && (
@@ -157,8 +293,28 @@ const MedCard: React.FC<MedCardProps> = ({
                 <Ionicons name="trash-outline" size={18} color="#FF3B30" />
               </TouchableOpacity>
             )}
+
           </View>
         </View>
+        <EditTakenMedicationModal
+  visible={showEditTakenModal}
+  medication={medication}
+  takenTime={takenTime ? `Taken ${formatTakenTime()}` : null}
+  onCancel={() => setShowEditTakenModal(false)}
+  onEdit={() => {
+    setShowEditTakenModal(false);
+    onEdit?.();
+  }}
+  onDuplicate={() => {
+    setShowEditTakenModal(false);
+    if (onDuplicate) {
+      onDuplicate();
+    } else {
+      onEdit?.();
+    }
+  }}
+/>
+
       </View>
     </View>
   );
@@ -174,16 +330,14 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
-    elevation: 8, // 🛡️ Increased elevation to stay above modal backdrop
+    elevation: 8,
     overflow: "hidden",
-    // 🛡️ Force consistent rendering properties
     opacity: 1,
-    minHeight: 80,
-    zIndex: 1, // 🛡️ Ensure proper stacking context
+    minHeight: 100,
+    zIndex: 1,
   },
   cardDisabled: { 
     opacity: 0.6,
-    // 🛡️ Even when disabled, ensure it's visible
     elevation: 4,
   },
   dueCard: {
@@ -193,17 +347,19 @@ const styles = StyleSheet.create({
     shadowColor: "#4361EE",
     shadowOpacity: 0.25,
     shadowRadius: 8,
-    elevation: 10, // 🛡️ Higher elevation for due cards
+    elevation: 10,
+  },
+  takenCard: {
+    borderLeftColor: "#4CAF50",
+    borderLeftWidth: 3,
   },
   statusIndicator: { 
     width: 4,
-    // 🛡️ Ensure status indicator is always visible
     opacity: 1,
   },
   content: { 
     flex: 1, 
     padding: 16,
-    // 🛡️ Prevent content from being clipped
     overflow: 'visible',
   },
   header: {
@@ -213,18 +369,37 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   medInfo: { flex: 1 },
+  nameRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
   name: {
     fontSize: 18,
     fontWeight: "700",
     color: "#1A1A1A",
-    marginBottom: 8,
-    // 🛡️ Ensure text is always readable
+    flex: 1,
     opacity: 1,
+  },
+  takenBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#4CAF5010",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  takenBadgeText: {
+    fontSize: 11,
+    color: "#4CAF50",
+    marginLeft: 4,
+    fontWeight: "600",
   },
   detailsRow: { 
     flexDirection: "row", 
     flexWrap: "wrap",
-    // 🛡️ Prevent row from collapsing
     minHeight: 24,
   },
   detailChip: {
@@ -236,7 +411,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginRight: 8,
     marginBottom: 4,
-    // 🛡️ Ensure chips are always visible
     opacity: 1,
   },
   detailText: { 
@@ -244,7 +418,7 @@ const styles = StyleSheet.create({
     color: "#666", 
     marginLeft: 4, 
     fontWeight: "500",
-    opacity: 1, // 🛡️ Force text opacity
+    opacity: 1,
   },
   statusBadge: {
     flexDirection: "row",
@@ -252,14 +426,60 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
-    // 🛡️ Ensure badge is always visible
     opacity: 1,
   },
   statusText: { 
     fontSize: 12, 
     fontWeight: "600", 
     marginLeft: 4,
-    opacity: 1, // 🛡️ Force text opacity
+    opacity: 1,
+  },
+  // New compliance styles
+  complianceSection: {
+    marginBottom: 12,
+  },
+  complianceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+  complianceBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F0F9FF",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  complianceText: {
+    fontSize: 11,
+    color: "#0284C7",
+    marginLeft: 4,
+    fontWeight: "500",
+  },
+  compliancePercentageBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  compliancePercentageText: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  lastActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8F9FA",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  lastActionText: {
+    fontSize: 11,
+    color: "#666",
+    marginLeft: 6,
+    fontWeight: "500",
   },
   reminderRow: {
     flexDirection: "row",
@@ -268,20 +488,18 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: "#F8F9FA",
     borderRadius: 8,
-    // 🛡️ Ensure reminder row is always visible
     opacity: 1,
   },
   reminderText: { 
     fontSize: 12, 
     color: "#666", 
     marginLeft: 6,
-    opacity: 1, // 🛡️ Force text opacity
+    opacity: 1,
   },
   actions: { 
     flexDirection: "row", 
     justifyContent: "space-between", 
     alignItems: "center",
-    // 🛡️ Ensure actions are always visible
     opacity: 1,
     minHeight: 40,
   },
@@ -295,7 +513,6 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 12,
     justifyContent: "center",
-    // 🛡️ Ensure button is always visible
     opacity: 1,
   },
   primaryActionText: { 
@@ -303,11 +520,10 @@ const styles = StyleSheet.create({
     color: "#FFF", 
     fontWeight: "600", 
     marginLeft: 6,
-    opacity: 1, // 🛡️ Force text opacity
+    opacity: 1,
   },
   secondaryActions: { 
     flexDirection: "row",
-    // 🛡️ Ensure secondary actions are always visible
     opacity: 1,
   },
   iconButton: {
@@ -315,8 +531,10 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     borderRadius: 8,
     backgroundColor: "#F5F5F5",
-    // 🛡️ Ensure icon buttons are always visible
     opacity: 1,
+  },
+  editButtonTaken: {
+    backgroundColor: "#FF980015",
   },
 });
 

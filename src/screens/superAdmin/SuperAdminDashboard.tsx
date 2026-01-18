@@ -5,6 +5,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/Services/supabaseClient';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { SuperAdminStackParamList } from '@/types/navigation';
+
+type SuperAdminStackNavigation = NativeStackNavigationProp<SuperAdminStackParamList>;
 
 interface DashboardStats {
   hospitalsCount: number;
@@ -13,7 +17,8 @@ interface DashboardStats {
 }
 
 export default function SuperAdminDashboard() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<SuperAdminStackNavigation>();
+ // const navigation = useNavigation();
   const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats>({
     hospitalsCount: 0,
@@ -62,7 +67,14 @@ export default function SuperAdminDashboard() {
       screen: 'HospitalManagement',
       color: '#4361EE'
     },
-    {
+     {
+        title: 'Verify Admins',  // ← ADD THIS
+        description: 'Approve administrator access requests',
+        icon: 'shield-checkmark',
+        screen: 'VerifyAdmins',
+        color: '#3A56E4'
+      },
+   /* {
       title: 'System Admins',
       description: 'Manage platform administrators',
       icon: 'shield-checkmark',
@@ -82,7 +94,7 @@ export default function SuperAdminDashboard() {
       icon: 'settings',
       screen: 'SystemSettings',
       color: '#F15BB5'
-    }
+    }*/
   ];
 
   return (
@@ -119,7 +131,7 @@ export default function SuperAdminDashboard() {
           <TouchableOpacity
             key={index}
             style={styles.menuCard}
-            onPress={() => navigation.navigate(item.screen as never)}
+             onPress={() => navigation.navigate(item.screen as any)}
           >
             <View style={[styles.iconContainer, { backgroundColor: item.color + '20' }]}>
               <Ionicons name={item.icon as any} size={28} color={item.color} />
@@ -142,6 +154,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa',
   },
   header: {
+    paddingTop: 60,
     padding: 20,
     backgroundColor: 'white',
   },

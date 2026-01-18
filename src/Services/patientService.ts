@@ -63,12 +63,16 @@ export const assignDoctorToPatient = async (
   }
 };
 
-// In patientService.ts - add this function if you don't have it
+
 export const getPatientDoctor = async (patientId: string) => {
   const { data, error } = await supabase
     .from('patient_doctor')
     .select(`
-      *,
+      id,
+      status,
+      is_verified,
+      doctor_id,
+      verified_at,
       doctor:users!patient_doctor_doctor_id_fkey (
         id,
         full_name,
@@ -82,9 +86,49 @@ export const getPatientDoctor = async (patientId: string) => {
     .eq('patient_id', patientId)
     .single();
 
+  // Ignore "not found" error
   if (error && error.code !== 'PGRST116') { // PGRST116 = not found
     throw error;
   }
-  
+
   return data;
+};
+
+export const getPendingPatientsForDoctor = async (doctorId: string) => {
+  const { data, error } = await supabase
+    .from('patient_doctor')
+    .select(`
+      patient_id,
+      is_verified,
+      verified_at,
+      patient:users!patient_doctor_patient_id_fkey (
+        id,
+        full_name,
+        email,
+        hospital_id,
+        role,
+        created_at,
+        image_url
+      )
+    `)
+    .eq('doctor_id', doctorId);
+    // Removed: .eq('status', 'pending') - might not exist
+  if (error) throw error;
+  
+  // Filter manually if needed
+  return data?.filter(item => !item.is_verified) || [];
+};
+
+
+export const verifyPatient = async (doctorId: string, patientId: string) => {
+  const { error } = await supabase
+    .from('patient_doctor')
+    .update({
+      is_verified: true,
+      verified_at: new Date().toISOString(),
+      status: 'verified'
+    })
+    .eq('doctor_id', doctorId)
+    .eq('patient_id', patientId);
+  if (error) throw error;
 };

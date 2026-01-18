@@ -51,4 +51,17 @@ export type DoctorStackParamList = {
   AppointmentSchedule: undefined;
   DoctorChatList: undefined;
   AddAppointment: undefined;
+
+  // ✅ New route for verifying patients
+  VerifyPatients: undefined;
+};
+
+
+ export type SuperAdminStackParamList = {
+  SuperAdminDashboard: undefined;
+  HospitalManagement: undefined;
+  VerifyAdmins: undefined;
+  AdminManagement: undefined;
+  PlatformAnalytics: undefined;
+  SystemSettings: undefined;
 };

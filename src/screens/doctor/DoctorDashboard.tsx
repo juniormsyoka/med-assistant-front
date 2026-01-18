@@ -13,7 +13,7 @@ import { chatService } from '@/Services/chatService';
 type DoctorStackParamList = {
   DoctorDashboard: undefined;
   PatientDetail: { patientId: string };
-  ChatRoom: { // ✅ Replace 'any' with proper type
+  ChatRoom: {
     mode: 'doctor';
     adapter: string;
     conversationId: string;
@@ -24,9 +24,13 @@ type DoctorStackParamList = {
     assignedDoctorId?: string;
   };
   AppointmentSchedule: undefined;
-  DoctorChatList: undefined; // ✅ Add this if you use it
-  addAppointment: undefined;
+  DoctorChatList: undefined;
+  AddAppointment: undefined;
+
+  // ✅ New route
+  VerifyPatients: undefined;
 };
+
 
 type DoctorNavigationProp = NativeStackNavigationProp<DoctorStackParamList>;
 interface Patient {
@@ -399,6 +403,16 @@ const loadDoctorData = async () => {
               <Ionicons name="stats-chart" size={24} color="#7209B7" />
             </View>
             <Text style={styles.quickActionText}>Reports</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.quickAction}
+            onPress={() => navigation.navigate('VerifyPatients')}
+          >
+            <View style={[styles.quickActionIcon, { backgroundColor: '#FFA00020' }]}>
+              <Ionicons name="checkmark-done" size={24} color="#FFA000" />
+            </View>
+            <Text style={styles.quickActionText}>Verify Patients</Text>
           </TouchableOpacity>
         </View>
       </View>

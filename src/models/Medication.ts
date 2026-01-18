@@ -23,6 +23,17 @@ export interface Medication {
   synced_at?: string;
   server_id?: string;
   local_id?: number; // For tracking during sync
+
+  personalization?: {
+    enabled: boolean;
+    optimalReminderOffsets?: number[]; // ML-suggested offsets
+    userAdjustedOffsets?: number[];    // User-overridden offsets
+    learningConfidence: number;        // 0-100%
+    lastAnalyzed?: string;             // ISO string
+    totalComplianceRecords: number;    // How much data we have
+  };
+
+
 }
 
 export interface CreateMedication {
@@ -36,6 +47,7 @@ export interface CreateMedication {
   day?: number;
   nextReminderAt?: string;
   reminderMinutes?: number[];
+   personalization?: Medication['personalization'];
   // ✅ Add supplyInfo to match storage.ts
   supplyInfo?: {
     totalQuantity: number;
@@ -46,4 +58,19 @@ export interface CreateMedication {
   synced_at?: string;
   server_id?: string;
   local_id?: number;
+}
+
+
+
+export interface ComplianceRecord {
+  id?: number;
+  medicationId: number;
+  scheduledTime: string;
+  reminderOffsetUsed: number; // Which reminder worked (minutes before)
+  actualAction: 'taken' | 'missed' | 'snoozed' | 'skipped';
+  actionTime?: string; // When user actually took/skipped
+  dayOfWeek: number;
+  hourOfDay: number;
+  latencySeconds?: number; // Response time
+  createdAt: string;
 }

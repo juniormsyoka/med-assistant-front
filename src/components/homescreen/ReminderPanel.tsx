@@ -10,31 +10,34 @@ import {
   TouchableWithoutFeedback 
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useTheme } from "@react-navigation/native";
-import * as Notifications from 'expo-notifications';
+import { useAppTheme } from "../../contexts/ThemeContext";
 import { Medication } from "../../models/Medication";
-import { generateNotificationId } from "../../Services/notifications";
-import { Platform } from "react-native";
+import { toast } from '@/Services/toastService';
+
 interface Props {
   visible: boolean;
   medication: Medication | null;
   onClose: () => void;
-  onTaken: () => void;
-  onSnooze?: (minutes: number) => void; // optional, fallback if not provided
-  onMissed: () => void;
+  onTaken: () => Promise<void>;
+  onMissed: () => Promise<void>;
+  onSnooze: (minutes: number) => Promise<void>;
+  onSkip?: () => Promise<void>;
 }
 
 const { height: screenHeight } = Dimensions.get("window");
-const DEFAULT_SOUND = 'default';
-export const ReminderPanel: React.FC<Props> = ({
-  visible,
-  medication,
-  onClose,
-  onTaken,
+
+export const ReminderPanel: React.FC<Props> = ({ 
+  visible, 
+  medication, 
+  onClose, 
+  onTaken, 
+  onMissed, 
   onSnooze,
-  onMissed,
+  onSkip 
 }) => {
-  const { colors } = useTheme();
+  const { theme } = useAppTheme();
+  const colors = theme.colors;
+
   const translateY = useRef(new Animated.Value(screenHeight)).current;
   const opacity = useRef(new Animated.Value(0)).current;
 
@@ -84,34 +87,44 @@ export const ReminderPanel: React.FC<Props> = ({
     }
   };
 
-  const handleSnooze = async (minutes: number) => {
-    if (!medication?.id) return;
-
-    const snoozeTime = new Date(Date.now() + minutes * 60 * 1000);
-
+  const handleTaken = async () => {
     try {
-      await Notifications.scheduleNotificationAsync({
-        identifier: generateNotificationId('medication', medication.id.toString(), `snooze_${Date.now()}`),
-        content: {
-          title: `💊 ${medication.name}`,
-          body: `Reminder after ${minutes} minute(s) snooze.`,
-          data: { medicationId: medication.id, type: 'medication-snooze' },
-          sound: DEFAULT_SOUND,
-          ...(Platform.OS === 'android' && { channelId: 'medication-reminders' }),
-        },
-        trigger: {
-    seconds: 15 * 60, // 15 minutes snooze
-    repeats: false,
-  } as Notifications.TimeIntervalTriggerInput,
-      });
-      onClose(); // close panel after scheduling snooze
-    } catch (error) {
-      console.error("Failed to schedule snooze notification:", error);
+      await onTaken();
+      // Don't call onClose here - the parent will handle it after success
+    } catch (err) {
+      toast.error("Failed to mark as taken");
+    }
+  };
+
+  const handleMissed = async () => {
+    try {
+      if (onSkip) {
+        await onSkip();
+      } else {
+        await onMissed();
+      }
+      // Don't call onClose here - the parent will handle it after success
+    } catch (err) {
+      toast.error("Failed to mark as missed/skipped");
+    }
+  };
+
+  const handleSnooze = async (minutes: number) => {
+    try {
+      await onSnooze(minutes);
+      // Don't call onClose here - the parent will handle it after success
+    } catch (err) {
+      toast.error("Failed to snooze");
     }
   };
 
   const dynamicStyles = {
-    sheet: { backgroundColor: colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, shadowColor: colors.text },
+    sheet: { 
+      backgroundColor: colors.card, 
+      borderTopLeftRadius: 24, 
+      borderTopRightRadius: 24, 
+      shadowColor: colors.text 
+    },
     title: { color: colors.text },
     medicationName: { color: colors.text },
     subtitle: { color: colors.text },
@@ -131,7 +144,6 @@ export const ReminderPanel: React.FC<Props> = ({
 
       <Animated.View style={[styles.container, { transform: [{ translateY }], opacity }]}>
         <View style={[styles.sheet, dynamicStyles.sheet]}>
-          {/* Header */}
           <View style={styles.header}>
             <View style={styles.medicationInfo}>
               <View style={[styles.iconContainer, { backgroundColor: colors.primary + '20' }]}>
@@ -144,6 +156,17 @@ export const ReminderPanel: React.FC<Props> = ({
                   <Text style={[styles.detailText, dynamicStyles.detailText]}>{medication.dosage}</Text>
                   <Text style={[styles.detailSeparator, { color: colors.text }]}>•</Text>
                   <Text style={[styles.detailText, dynamicStyles.detailText]}>{formatTime(medication.time)}</Text>
+                  {medication.nextReminderAt && (
+                    <>
+                      <Text style={[styles.detailSeparator, { color: colors.text }]}>•</Text>
+                      <Text style={[styles.detailText, dynamicStyles.detailText]}>
+                        Next: {new Date(medication.nextReminderAt).toLocaleTimeString([], { 
+                          hour: "2-digit", 
+                          minute: "2-digit" 
+                        })}
+                      </Text>
+                    </>
+                  )}
                 </View>
               </View>
             </View>
@@ -154,11 +177,11 @@ export const ReminderPanel: React.FC<Props> = ({
 
           <Text style={[styles.subtitle, dynamicStyles.subtitle]}>What would you like to do?</Text>
 
-          {/* Action Buttons */}
           <View style={styles.actions}>
+            {/* Taken Button */}
             <TouchableOpacity 
               style={[styles.actionButton, { backgroundColor: colors.primary + '15', borderColor: colors.primary }]}
-              onPress={onTaken}
+              onPress={handleTaken}
             >
               <View style={styles.buttonContent}>
                 <Ionicons name="checkmark-circle" size={24} color={colors.primary} />
@@ -170,6 +193,7 @@ export const ReminderPanel: React.FC<Props> = ({
               <Ionicons name="chevron-forward" size={20} color={colors.primary} />
             </TouchableOpacity>
 
+            {/* Snooze Button */}
             <TouchableOpacity 
               style={[styles.actionButton, { backgroundColor: colors.notification + '15', borderColor: colors.notification }]}
               onPress={() => handleSnooze(15)}
@@ -184,15 +208,20 @@ export const ReminderPanel: React.FC<Props> = ({
               <Ionicons name="chevron-forward" size={20} color={colors.notification} />
             </TouchableOpacity>
 
+            {/* Skip/Missed Button */}
             <TouchableOpacity 
               style={[styles.actionButton, { backgroundColor: '#EF444415', borderColor: '#EF4444' }]}
-              onPress={onMissed}
+              onPress={handleMissed}
             >
               <View style={styles.buttonContent}>
                 <Ionicons name="close-circle" size={24} color="#EF4444" />
                 <View style={styles.buttonTextContainer}>
-                  <Text style={[styles.actionButtonText, dynamicStyles.actionButtonText]}>Skip</Text>
-                  <Text style={[styles.actionButtonSubtext, dynamicStyles.actionButtonSubtext]}>I won't take it now</Text>
+                  <Text style={[styles.actionButtonText, dynamicStyles.actionButtonText]}>
+                    {onSkip ? 'Skip' : 'Missed'}
+                  </Text>
+                  <Text style={[styles.actionButtonSubtext, dynamicStyles.actionButtonSubtext]}>
+                    {onSkip ? 'I won\'t take it now' : 'Mark as missed'}
+                  </Text>
                 </View>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#EF4444" />
@@ -204,7 +233,11 @@ export const ReminderPanel: React.FC<Props> = ({
             <Text style={[styles.quickSnoozeTitle, dynamicStyles.quickSnoozeTitle]}>Quick Snooze</Text>
             <View style={styles.quickSnoozeButtons}>
               {[5, 10, 30].map(min => (
-                <TouchableOpacity key={min} style={[styles.quickSnoozeButton, dynamicStyles.quickSnoozeButton]} onPress={() => handleSnooze(min)}>
+                <TouchableOpacity 
+                  key={min} 
+                  style={[styles.quickSnoozeButton, dynamicStyles.quickSnoozeButton]} 
+                  onPress={() => handleSnooze(min)}
+                >
                   <Text style={[styles.quickSnoozeText, dynamicStyles.quickSnoozeText]}>{min} min</Text>
                 </TouchableOpacity>
               ))}
@@ -217,29 +250,149 @@ export const ReminderPanel: React.FC<Props> = ({
 };
 
 const styles = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0, 0, 0, 0.6)" },
-  container: { position: "absolute", bottom: 0, left: 0, right: 0, maxHeight: "70%", justifyContent: "flex-end" },
-  sheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.1, shadowRadius: 12, elevation: 8 },
-  header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 },
-  medicationInfo: { flexDirection: "row", flex: 1 },
-  iconContainer: { width: 48, height: 48, borderRadius: 24, justifyContent: "center", alignItems: "center", marginRight: 12 },
-  textContainer: { flex: 1 },
-  title: { fontSize: 16, fontWeight: "600", marginBottom: 4, opacity: 0.8 },
-  medicationName: { fontSize: 20, fontWeight: "700", marginBottom: 8 },
-  details: { flexDirection: "row", alignItems: "center" },
-  detailText: { fontSize: 14, fontWeight: "500", opacity: 0.8 },
-  detailSeparator: { fontSize: 14, marginHorizontal: 8, opacity: 0.8 },
-  closeButton: { padding: 4, marginLeft: 8 },
-  subtitle: { fontSize: 16, fontWeight: "600", marginBottom: 16 },
-  actions: { gap: 12, marginBottom: 24 },
-  actionButton: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16, borderRadius: 12, borderWidth: 1 },
-  buttonContent: { flexDirection: "row", alignItems: "center", flex: 1 },
-  buttonTextContainer: { marginLeft: 12 },
-  actionButtonText: { fontSize: 16, fontWeight: "600", marginBottom: 2 },
-  actionButtonSubtext: { fontSize: 12, opacity: 0.8 },
-  quickSnooze: { borderTopWidth: 1, paddingTop: 16 },
-  quickSnoozeTitle: { fontSize: 14, fontWeight: "600", marginBottom: 12, opacity: 0.8 },
-  quickSnoozeButtons: { flexDirection: "row", gap: 8 },
-  quickSnoozeButton: { flex: 1, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, alignItems: "center" },
-  quickSnoozeText: { fontSize: 14, fontWeight: "500" },
+  backdrop: { 
+    ...StyleSheet.absoluteFillObject, 
+    backgroundColor: "rgba(0, 0, 0, 0.6)" 
+  },
+  container: { 
+    position: "absolute", 
+    bottom: 0, 
+    left: 0, 
+    right: 0, 
+    maxHeight: "70%", 
+    justifyContent: "flex-end" 
+  },
+  sheet: { 
+    borderTopLeftRadius: 24, 
+    borderTopRightRadius: 24, 
+    padding: 24, 
+    shadowOffset: { width: 0, height: -4 }, 
+    shadowOpacity: 0.1, 
+    shadowRadius: 12, 
+    elevation: 8 
+  },
+  header: { 
+    flexDirection: "row", 
+    justifyContent: "space-between", 
+    alignItems: "flex-start", 
+    marginBottom: 20 
+  },
+  medicationInfo: { 
+    flexDirection: "row", 
+    flex: 1 
+  },
+  iconContainer: { 
+    width: 48, 
+    height: 48, 
+    borderRadius: 24, 
+    justifyContent: "center", 
+    alignItems: "center", 
+    marginRight: 12 
+  },
+  textContainer: { 
+    flex: 1 
+  },
+  title: { 
+    fontSize: 16, 
+    fontWeight: "600", 
+    marginBottom: 4, 
+    opacity: 0.8 
+  },
+  medicationName: { 
+    fontSize: 20, 
+    fontWeight: "700", 
+    marginBottom: 8 
+  },
+  details: { 
+    flexDirection: "row", 
+    alignItems: "center", 
+    flexWrap: 'wrap' 
+  },
+  detailText: { 
+    fontSize: 14, 
+    fontWeight: "500", 
+    opacity: 0.8 
+  },
+  detailSeparator: { 
+    fontSize: 14, 
+    marginHorizontal: 8, 
+    opacity: 0.8 
+  },
+  closeButton: { 
+    padding: 4, 
+    marginLeft: 8 
+  },
+  subtitle: { 
+    fontSize: 16, 
+    fontWeight: "600", 
+    marginBottom: 16 
+  },
+  actions: { 
+    gap: 12, 
+    marginBottom: 24 
+  },
+  actionButton: { 
+    flexDirection: "row", 
+    alignItems: "center", 
+    justifyContent: "space-between", 
+    padding: 16, 
+    borderRadius: 12, 
+    borderWidth: 1 
+  },
+  buttonContent: { 
+    flexDirection: "row", 
+    alignItems: "center", 
+    flex: 1 
+  },
+  buttonTextContainer: { 
+    marginLeft: 12 
+  },
+  actionButtonText: { 
+    fontSize: 16, 
+    fontWeight: "600", 
+    marginBottom: 2 
+  },
+  actionButtonSubtext: { 
+    fontSize: 12, 
+    opacity: 0.8 
+  },
+  quickSnooze: { 
+    borderTopWidth: 1, 
+    paddingTop: 16 
+  },
+  quickSnoozeTitle: { 
+    fontSize: 14, 
+    fontWeight: "600", 
+    marginBottom: 12, 
+    opacity: 0.8 
+  },
+  quickSnoozeButtons: { 
+    flexDirection: "row", 
+    gap: 8 
+  },
+  quickSnoozeButton: { 
+    flex: 1, 
+    paddingVertical: 8, 
+    paddingHorizontal: 12, 
+    borderRadius: 8, 
+    alignItems: "center" 
+  },
+  quickSnoozeText: { 
+    fontSize: 14, 
+    fontWeight: "500" 
+  },
+  notesContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 16,
+    gap: 8,
+  },
+  notesText: {
+    fontSize: 12,
+    opacity: 0.8,
+    flex: 1,
+    fontStyle: 'italic',
+  },
 });

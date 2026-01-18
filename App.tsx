@@ -10,8 +10,8 @@ import * as Notifications from "expo-notifications";
 import * as BackgroundFetch from "expo-background-fetch";
 import * as TaskManager from "expo-task-manager";
 
-import { initDatabase, getMedications, resetMessagesTable  } from "./src/Services/storage";
-import { configureNotificationHandler, requestPermissions, scheduleMedicationReminder } from "./src/Services/notifications";
+import { initDatabase, getMedications, resetMessagesTable } from "./src/Services/storage";
+import { NotificationService } from "./src/Services/notifications";
 import { settingsService } from "./src/Services/Settings";
 import { RESET_TASK } from "./src/Services/resetTasks";
 
@@ -30,12 +30,14 @@ import DoctorDashboard from "./src/screens/doctor/DoctorDashboard";
 import OnboardingScreen from "./src/screens/OnboardingScreen";
 
 import DoctorInvitesignup from "./src/screens/auth/DoctorInviteSignUp";
+import VerifyPatientsScreen from "./src/screens/doctor/VerifyPatientsScreen";
 
 import PatientAppointmentsScreen from "./src/screens/PatientAppointmentsScreen";
 
 // Super Admin Screens
 import SuperAdminDashboard from "./src/screens/superAdmin/SuperAdminDashboard";
 import HospitalManagement from "./src/screens/superAdmin/HospitalManagement";
+import VerifyAdminsScreen from "./src/screens/superAdmin/VerifyAdminsScreen";
 
 // Admin Screens
 import AdminDashboard from "./src/screens/admin/AdminDashboard";
@@ -56,9 +58,17 @@ import { AuthProvider, useAuth } from "./src/contexts/AuthContext";
 
 import DoctorChatList from "./src/components/DoctorChatList";
 
-
 import Toast from 'react-native-toast-message';
 import { toastConfig } from './src/config/toastConfig';
+
+import { AnalyticsProvider } from './src/contexts/AnalyticsContext';
+
+import { ReminderPanel } from './src/components/homescreen/ReminderPanel';
+import { PastMedicationListener } from './src/components/homescreen/PastMedicationListener';
+import { MedicationActionService } from './src/Services/centalizedMedicalStatus/MedicationActionService';
+import { useMedicationStore } from './src/stores/medicationStore';
+
+import 'react-native-get-random-values';
 
 import * as Linking from "expo-linking";
 
@@ -78,6 +88,7 @@ type RootParamList = {
   Diagnosis: undefined;
   Analytics: undefined;
   Onboarding: undefined;
+  PatientAppointments: undefined;
 };
 
 const linking: LinkingOptions<RootParamList> = {
@@ -97,6 +108,7 @@ const linking: LinkingOptions<RootParamList> = {
       Doctor: "doctor",
       SuperAdmin: "superadmin",
       Chat: "chat",
+      PatientAppointments: "appointments",
     },
   },
 };
@@ -115,6 +127,19 @@ function AppContent() {
   const [medications, setMedications] = useState<any[]>([]);
   const medsRef = useRef<any[]>([]);
   const navigationRef = useRef<any>(null);
+
+  const [panelVisible, setPanelVisible] = useState(false);
+  const [panelMedication, setPanelMedication] = useState<any | null>(null);
+  const [panelScheduledTime, setPanelScheduledTime] = useState<Date | null>(null);
+
+  // Get store refresh function
+  const refreshStore = useMedicationStore(state => state.refresh);
+
+  const openPastMedicationPanel = ({ medication, scheduledTime }: any) => {
+    setPanelMedication(medication);
+    setPanelScheduledTime(scheduledTime);
+    setPanelVisible(true);
+  };
 
   // register background reset task
   const registerResetTask = async () => {
@@ -150,27 +175,34 @@ function AppContent() {
   useEffect(() => {
     const initializeApp = async () => {
       try {
-     
         await initDatabase();
-           await resetMessagesTable ();
-        await configureNotificationHandler();
-        const granted = await requestPermissions();
+        await resetMessagesTable();
+        
+        // Configure notifications using NotificationService
+        await NotificationService.configureNotificationHandler();
+        const granted = await NotificationService.requestPermissions();
         if (!granted) {
           Alert.alert("Notifications Disabled", "⚠️ Please enable notifications in settings to receive medication reminders.");
         }
+        
         const userProfile = await settingsService.initialize();
         const selectedTheme =
           Themes.find((t) => t.name === userProfile.preferences.theme) || Themes[0];
         setTheme(selectedTheme);
 
+        // Clear and reschedule notifications
         await Notifications.cancelAllScheduledNotificationsAsync();
         const meds = await getMedications();
         setMedications(meds);
         medsRef.current = meds;
 
+        // Schedule reminders for enabled medications
         for (const med of meds) {
-          if (med.enabled) await scheduleMedicationReminder(med);
+          if (med.enabled) {
+            await NotificationService.scheduleMedicationReminder(med);
+          }
         }
+        
         await registerResetTask();
         setDbInitialized(true);
       } catch (error) {
@@ -210,14 +242,14 @@ function AppContent() {
         name="HomeMain"
         children={(props) => (
           <View style={{ flex: 1 }}>
-            <HomeScreen {...props} medications={medications} medsRef={medsRef} />
+            <HomeScreen {...props} />
             <AnimatedFloatingButton onPress={drawerControls.toggleDrawer} />
           </View>
         )}
       />
       <HomeStack.Screen name="Add" component={AddMedScreen} />
       <HomeStack.Screen name="AddAppointment" component={AddAppointmentScreen} />
-        <HomeStack.Screen name="PatientAppointments" component={PatientAppointmentsScreen} />
+      <HomeStack.Screen name="PatientAppointments" component={PatientAppointmentsScreen} />
     </HomeStack.Navigator>
   );
 
@@ -254,6 +286,7 @@ function AppContent() {
     HospitalManagement: undefined;
     AdminManagement: undefined;
     PlatformAnalytics: undefined;
+    VerifyAdmins: undefined;
     SystemSettings: undefined;
   };
 
@@ -263,6 +296,7 @@ function AppContent() {
     <SuperAdminStack.Navigator screenOptions={{ headerShown: false }}>
       <SuperAdminStack.Screen name="SuperAdminDashboard" component={SuperAdminDashboard} />
       <SuperAdminStack.Screen name="HospitalManagement" component={HospitalManagement} />
+      <SuperAdminStack.Screen name="VerifyAdmins" component={VerifyAdminsScreen} />
     </SuperAdminStack.Navigator>
   );
 
@@ -271,9 +305,9 @@ function AppContent() {
     AdminDashboard: undefined;
     DoctorManagement: undefined;
     PatientAssignments: undefined;
-    DoctorInvitations: undefined;        
-    VerifyDoctors: undefined;            
-    InviteDoctor: undefined;             
+    DoctorInvitations: undefined;
+    VerifyDoctors: undefined;
+    InviteDoctor: undefined;
     AppointmentManagement: undefined;
   };
 
@@ -291,55 +325,60 @@ function AppContent() {
   );
 
   // Doctor Stack
-  // In App.tsx - Update the navigator to include ChatRoom screen
-type DoctorStackParamList = {
-  DoctorDashboard: undefined;
-  PatientDetail: { patientId: string };
-  ChatRoom: { // ✅ ADD THIS
-    mode: 'doctor';
-    adapter: string;
-    conversationId: string;
-    userRole: string;
-    userId: string;
-    patientId: string;
-    patientName: string;
-    assignedDoctorId?: string;
+  type DoctorStackParamList = {
+    DoctorDashboard: undefined;
+    PatientDetail: { patientId: string };
+    ChatRoom: {
+      mode: 'doctor';
+      adapter: string;
+      conversationId: string;
+      userRole: string;
+      userId: string;
+      patientId: string;
+      patientName: string;
+      assignedDoctorId?: string;
+    };
+    AppointmentSchedule: undefined;
+    DoctorChatList: undefined;
+    AddAppointment: undefined;
+    VerifyPatients: undefined;
   };
-  AppointmentSchedule: undefined;
-  DoctorChatList: undefined; // ✅ Add this if you use it
-  AddAppointment: undefined;
-};
 
+  const DoctorStack = createNativeStackNavigator<DoctorStackParamList>();
 
-
-const DoctorStack = createNativeStackNavigator<DoctorStackParamList>();
-
-const DoctorStackScreen = () => (
-  <DoctorStack.Navigator screenOptions={{ headerShown: false }}>
-    <DoctorStack.Screen name="DoctorDashboard" component={DoctorDashboard} />
-    {/* ✅ ADD ChatRoom screen to the navigator */}
-    <DoctorStack.Screen 
-      name="ChatRoom" 
-      component={ChatRoom} 
-      options={{ 
-        headerShown: true, 
-        title: 'Chat with Patient',
-        headerBackTitle: 'Back' 
-      }}
-    />
-    {/* ✅ Add DoctorChatList if you use it */}
-    <DoctorStack.Screen name="DoctorChatList" component={DoctorChatList} />
-     <DoctorStack.Screen 
-      name="AddAppointment" 
-      component={AddAppointmentScreen}
-      options={{
-        headerShown: true,
-        title: 'Schedule Appointment',
-        headerBackTitle: 'Back'
-      }}
-    />
-  </DoctorStack.Navigator>
-);
+  const DoctorStackScreen = () => (
+    <DoctorStack.Navigator screenOptions={{ headerShown: false }}>
+      <DoctorStack.Screen name="DoctorDashboard" component={DoctorDashboard} />
+      <DoctorStack.Screen 
+        name="ChatRoom" 
+        component={ChatRoom} 
+        options={{ 
+          headerShown: true, 
+          title: 'Chat with Patient',
+          headerBackTitle: 'Back' 
+        }}
+      />
+      <DoctorStack.Screen name="DoctorChatList" component={DoctorChatList} />
+      <DoctorStack.Screen 
+        name="AddAppointment" 
+        component={AddAppointmentScreen}
+        options={{
+          headerShown: true,
+          title: 'Schedule Appointment',
+          headerBackTitle: 'Back'
+        }}
+      />
+      <DoctorStack.Screen 
+        name="VerifyPatients" 
+        component={VerifyPatientsScreen} 
+        options={{ 
+          headerShown: true, 
+          title: 'Verify Patients',
+          headerBackTitle: 'Back' 
+        }}
+      />
+    </DoctorStack.Navigator>
+  );
 
   // Auth Stack
   const AuthStack = createNativeStackNavigator<AuthStackParamList>();
@@ -454,17 +493,17 @@ const DoctorStackScreen = () => (
         >
           {(props) => <ScreenWithFAB component={OnboardingScreen} {...props} />}
         </Drawer.Screen>,
-        <Drawer.Screen
-      key="PatientAppointments"
-      name="PatientAppointments"
-      options={{
-        drawerLabel: "My Appointments",
-        drawerIcon: ({ color, size }) => <Ionicons name="calendar" size={size} color={color} />,
-      }}
-    >
-      {(props) => <ScreenWithFAB component={PatientAppointmentsScreen} {...props} />}
-    </Drawer.Screen>
 
+        <Drawer.Screen
+          key="PatientAppointments"
+          name="PatientAppointments"
+          options={{
+            drawerLabel: "My Appointments",
+            drawerIcon: ({ color, size }) => <Ionicons name="calendar" size={size} color={color} />,
+          }}
+        >
+          {(props) => <ScreenWithFAB component={PatientAppointmentsScreen} {...props} />}
+        </Drawer.Screen>
       );
     }
 
@@ -530,6 +569,43 @@ const DoctorStackScreen = () => (
     return [...baseScreens, ...roleSpecificScreens];
   };
 
+  // Handler for past medication actions
+  const handlePastMedicationAction = async (
+    actionType: "take" | "miss" | "snooze",
+    minutes?: number
+  ) => {
+    if (!panelMedication) return;
+
+    try {
+      const result = await MedicationActionService.handleAction(
+        panelMedication,
+        actionType,
+        minutes ? { minutes } : {}
+      );
+
+      if (result.success) {
+        Toast.show({
+          type: 'success',
+          text1: result.message || 'Action completed',
+        });
+      } else {
+        Toast.show({
+          type: 'error',
+          text1: result.message || 'Action failed',
+        });
+      }
+      
+      // Refresh store to update UI
+      await refreshStore();
+    } catch (error) {
+      console.error('❌ Past medication action failed:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to record action',
+      });
+    }
+  };
+
   return (
     <DrawerContext.Provider value={drawerControls}>
       <NavigationContainer theme={theme} ref={navigationRef} linking={linking}>
@@ -546,7 +622,30 @@ const DoctorStackScreen = () => (
           {getDrawerScreens()}
         </Drawer.Navigator>
       </NavigationContainer>
-       <Toast config={toastConfig} />
+
+      {/* 🔔 LISTENS FOR PAST MED EVENTS */}
+      <PastMedicationListener onOpenPanel={openPastMedicationPanel} />
+
+      {/* ⬆️ GLOBAL REMINDER PANEL */}
+      <ReminderPanel
+        visible={panelVisible}
+        medication={panelMedication}
+        onClose={() => setPanelVisible(false)}
+        onTaken={async () => {
+          await handlePastMedicationAction("take");
+          setPanelVisible(false);
+        }}
+        onMissed={async () => {
+          await handlePastMedicationAction("miss");
+          setPanelVisible(false);
+        }}
+        onSnooze={async (minutes: number) => {
+          await handlePastMedicationAction("snooze", minutes);
+          setPanelVisible(false);
+        }}
+      />
+      
+      <Toast config={toastConfig} />
     </DrawerContext.Provider>
   );
 }
@@ -557,7 +656,9 @@ export default function App() {
     <ThemeProvider>
       <AuthProvider>
         <FeedbackProvider>
-          <AppContent />
+          <AnalyticsProvider>
+            <AppContent />
+          </AnalyticsProvider>
         </FeedbackProvider>
       </AuthProvider>
     </ThemeProvider>

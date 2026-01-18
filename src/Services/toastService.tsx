@@ -1,13 +1,14 @@
-// src/Services/toastService.ts
+// src/Services/toastService.ts - SIMPLER VERSION
 import Toast from 'react-native-toast-message';
 
 export const toast = {
-  success: (message: string) => {
+  success: (message: string, options?: { undoAction?: () => void }) => {
     Toast.show({
       type: 'success',
       text1: message,
       position: 'top',
       visibilityTime: 4000,
+      props: options
     });
   },
 

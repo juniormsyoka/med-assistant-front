@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { View, ScrollView, RefreshControl, Animated, TouchableWithoutFeedback, TouchableOpacity, StyleSheet, Text } from "react-native";
 import { useFocusEffect, useTheme } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,12 +19,15 @@ import { RefillAlertBanner } from "../components/homescreen/RefillAlertBanner";
 import { LoadingState } from "../components/homescreen/LoadingState";
 import { ErrorBoundary } from "../components/homescreen/ErrorBoundary";
 
-import { isMedicationDue } from "../utils/medicationUtils";
 import { getUpcomingAppointments, markAppointmentCompleted } from "../Services/storage";
 import { getLowSupplyMedications, markRefillCompleted } from "../Services/storage";
 import { Appointment } from "../models/Appointment";
 
+import { ComplianceTracker } from "../Services/ComplianceTracker";
+import { MedicationActionService } from "../Services/centalizedMedicalStatus/MedicationActionService";
+
 import { useAuth } from "../contexts/AuthContext";
+import { useMedicationStatus } from "../hooks/useMedicationStatus";
 
 const HomeScreen = ({ navigation }: any) => {
   const { colors } = useTheme();
@@ -42,7 +45,7 @@ const HomeScreen = ({ navigation }: any) => {
     deleteVisible,
     medicationToDelete,
     refresh,
-    handleAction,
+    handleAction, // Keep for delete and reminder actions
     closeReminderModal,
     confirmDelete,
     cancelDelete,
@@ -51,19 +54,17 @@ const HomeScreen = ({ navigation }: any) => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [refillAlerts, setRefillAlerts] = useState<Array<{ medication: any; refill: any }>>([]);
   const [loadingAppointments, setLoadingAppointments] = useState(true);
+  const [complianceInsights, setComplianceInsights] = useState<Record<number, any>>({});
 
   const alreadyShownRef = useRef<Set<string>>(new Set());
   const overlayOpacity = useRef(new Animated.Value(0)).current;
 
-  const stats = {
-    total: medications.length,
-    taken: medications.filter((m) => m.status === "taken").length,
-    missed: medications.filter((m) => m.status === "missed").length,
-    snoozed: medications.filter((m) => m.status === "snoozed").length,
-    skipped: medications.filter((m) => m.status === "skipped").length,
-    late: medications.filter((m) => m.status === "late").length,
-    rescheduled: medications.filter((m) => m.status === "rescheduled").length,
-  };
+  // ✅ Use centralized medication status hook
+  const { medsWithStatus, stats: enhancedStats, isLoading: statusLoading } = useMedicationStatus(
+    medications,
+    complianceInsights,
+    loading
+  );
 
   // Role-based appointment button component
   const RoleBasedAppointmentButton = () => {
@@ -160,6 +161,7 @@ const HomeScreen = ({ navigation }: any) => {
 
       if (now >= scheduledTime && !alreadyShownRef.current.has(medicationId) && !reminderVisible) {
         alreadyShownRef.current.add(medicationId);
+        // Use store's handleAction for reminder
         handleAction({ type: "reminder", medication: med });
       }
     });
@@ -180,9 +182,11 @@ const HomeScreen = ({ navigation }: any) => {
         const scheduledTime = med.nextReminderAt
           ? new Date(med.nextReminderAt)
           : new Date(med.time);
-        const actionable = med.status !== "taken" && med.status !== "missed";
-
-        if (now >= scheduledTime && actionable && !alreadyShownRef.current.has(medId) && !reminderVisible) {
+        
+        // Check if medication is active and due
+        const isActive = med.enabled && med.status !== "taken" && med.status !== "missed";
+        
+        if (now >= scheduledTime && isActive && !alreadyShownRef.current.has(medId) && !reminderVisible) {
           alreadyShownRef.current.add(medId);
           handleAction({ type: "reminder", medication: med });
         }
@@ -216,6 +220,125 @@ const HomeScreen = ({ navigation }: any) => {
       useNativeDriver: true,
     }).start();
   }, [reminderVisible]);
+
+  // -----------------------------
+  // Load compliance insights
+  // -----------------------------
+  useEffect(() => {
+    let isMounted = true;
+    
+    const loadComplianceInsights = async () => {
+      if (medications.length === 0 || loading) return;
+      
+      try {
+        const newInsights: Record<number, any> = {};
+        
+        for (const med of medications) {
+          if (med.id && !complianceInsights[med.id]) {
+            // Get compliance stats
+            const stats = await useMedicationStore.getState().getComplianceInsights(med.id);
+            
+            // Get detailed records for enhanced insights
+            const records = await ComplianceTracker.getMedicationRecords(med.id);
+            const latestRecord = records.sort((a, b) => 
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            )[0];
+            
+            newInsights[med.id] = {
+              ...stats,
+              lastAction: latestRecord?.actualAction,
+              lastActionTime: latestRecord?.createdAt,
+              takenCount: records.filter(r => r.actualAction === 'taken').length,
+              missedCount: records.filter(r => r.actualAction === 'missed').length,
+              snoozedCount: records.filter(r => r.actualAction === 'snoozed').length,
+              skippedCount: records.filter(r => r.actualAction === 'skipped').length,
+              lateCount: records.filter(r => r.actualAction === 'late').length,
+              totalRecords: records.length,
+            };
+          }
+        }
+        
+        if (isMounted && Object.keys(newInsights).length > 0) {
+          setComplianceInsights(prev => ({ ...prev, ...newInsights }));
+        }
+      } catch (error) {
+        console.error('❌ Failed to load compliance insights:', error);
+      }
+    };
+    
+    const timeoutId = setTimeout(loadComplianceInsights, 500);
+    
+    return () => {
+      isMounted = false;
+      clearTimeout(timeoutId);
+    };
+  }, [medications, loading]);
+
+  // Clear insights when no medications
+  useEffect(() => {
+    if (medications.length === 0) {
+      setComplianceInsights({});
+    }
+  }, [medications.length]);
+
+  const handleRefresh = useCallback(() => {
+    refresh();
+    loadAdditionalData();
+    setComplianceInsights({}); // Clear insights to force reload
+  }, [refresh, loadAdditionalData]);
+
+  // -----------------------------
+  // New centralized action handlers
+  // -----------------------------
+  const handleCentralizedAction = useCallback(async (
+    actionType: "take" | "miss" | "snooze" | "skip" | "refill",
+    medication: any,
+    data?: any
+  ) => {
+    try {
+      const result = await MedicationActionService.handleAction(
+        medication,
+        actionType,
+        data
+      );
+
+      if (result.success) {
+        // Show appropriate feedback
+        const feedbackMessages = {
+          take: `✅ ${medication.name} marked as taken!`,
+          miss: `⚠️ ${medication.name} marked as missed`,
+          snooze: `⏰ ${medication.name} snoozed for ${data?.minutes || 15} minutes`,
+          skip: `⏭️ ${medication.name} skipped`,
+          refill: `🔄 ${medication.name} refilled`
+        };
+        
+        showFeedback(feedbackMessages[actionType], 
+          actionType === "take" ? "success" : 
+          actionType === "miss" ? "warning" : "info");
+        
+        // Clear compliance insights for this medication
+        if (medication.id) {
+          setComplianceInsights(prev => {
+            const updated = { ...prev };
+            delete updated[medication.id!];
+            return updated;
+          });
+        }
+        
+        // Refresh data
+        await refresh();
+        
+        return { success: true, result };
+      } else {
+        showFeedback(result.message || `Failed to ${actionType} medication`, "warning");
+        return { success: false, error: result.message };
+      }
+    } catch (error) {
+      console.error(`❌ ${actionType} action failed:`, error);
+      showFeedback(`Failed to ${actionType} medication`, "warning");
+      return { success: false, error };
+    }
+  }, [showFeedback, refresh]);
 
   // -----------------------------
   // Profile & navigation
@@ -257,18 +380,13 @@ const HomeScreen = ({ navigation }: any) => {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => {
-              refresh();
-              loadAdditionalData();
-            }}
+            onRefresh={handleRefresh}
           />
         }
         showsVerticalScrollIndicator={false}
       >
         <View style={{ padding: 20 }}>
           <WelcomeSection
-            userName={profile?.name}
-            profilePicture={profile?.profilePicture}
             theme={colors}
             onProfilePress={handleProfilePress}
           />
@@ -281,10 +399,14 @@ const HomeScreen = ({ navigation }: any) => {
         />
 
         <View style={{ paddingHorizontal: 20 }}>
-          <StatsSection stats={stats} />
+          <StatsSection 
+              medications={medications}
+              complianceInsightsMap={complianceInsights}
+              isLoading={statusLoading}
+            />
         </View>
 
-        {/* ✅ Role-based appointment button */}
+        {/* Role-based appointment button */}
         <RoleBasedAppointmentButton />
 
         <AppointmentsSection
@@ -306,19 +428,23 @@ const HomeScreen = ({ navigation }: any) => {
             <EmptyState onAddMedication={() => navigation.navigate("Add")} theme={colors} />
           ) : (
             <MedicationList
-              medications={medications}
+              medications={medsWithStatus} // ✅ Use medsWithStatus instead of raw medications
               navigation={navigation}
-              isMedicationDue={isMedicationDue}
               onDelete={(m) => handleAction({ type: "delete", medication: m })}
-              onMarkTaken={(m) => handleAction({ type: "take", medication: m })}
-              onMarkMissed={(m) => handleAction({ type: "miss", medication: m })}
+                onMarkTaken={async (m) => {
+                  await handleCentralizedAction("take", m);
+                }}
+                onMarkMissed={async (m) => {
+                  await handleCentralizedAction("miss", m);
+                }}
               onOpenReminderActions={(m) => handleAction({ type: "reminder", medication: m })}
+              complianceInsights={complianceInsights}
             />
           )}
         </View>
       </ScrollView>
 
-      {/* ✅ Fade background overlay */}
+      {/* Fade background overlay */}
       {reminderVisible && (
         <TouchableWithoutFeedback onPress={closeReminderModal}>
           <Animated.View
@@ -331,31 +457,29 @@ const HomeScreen = ({ navigation }: any) => {
         </TouchableWithoutFeedback>
       )}
 
-      {/* ✅ New Pure JS Reminder Panel */}
+      {/* Updated ReminderPanel with centralized actions */}
       <ReminderPanel
         visible={reminderVisible}
         medication={activeMedication}
         onClose={closeReminderModal}
         onTaken={async () => {
           if (!activeMedication) return;
-          await handleAction({ type: "take", medication: activeMedication });
-          showFeedback(`✅ ${activeMedication.name} marked as taken!`, "success");
+          await handleCentralizedAction("take", activeMedication);
           setTimeout(closeReminderModal, 500);
         }}
         onMissed={async () => {
           if (!activeMedication) return;
-          await handleAction({ type: "miss", medication: activeMedication });
-          showFeedback(`⚠️ ${activeMedication.name} marked as missed`, "warning");
+          await handleCentralizedAction("miss", activeMedication);
           setTimeout(closeReminderModal, 500);
         }}
         onSnooze={async (minutes: number) => {
           if (!activeMedication) return;
-          await handleAction({
-            type: "snooze",
-            medication: activeMedication,
-            data: { minutes },
-          });
-          showFeedback(`⏰ ${activeMedication.name} snoozed for ${minutes} minutes`, "info");
+          await handleCentralizedAction("snooze", activeMedication, { minutes });
+          setTimeout(closeReminderModal, 500);
+        }}
+        onSkip={async () => {
+          if (!activeMedication) return;
+          await handleCentralizedAction("skip", activeMedication);
           setTimeout(closeReminderModal, 500);
         }}
       />

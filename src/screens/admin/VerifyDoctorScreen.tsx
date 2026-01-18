@@ -5,41 +5,57 @@ import { supabase } from '@/Services/supabaseClient';
 import EmptyState from '@/components/admin/EmptyState';
 import { Ionicons } from '@expo/vector-icons';
 
-export default function VerifyDoctorsScreen() {
-  const [doctors, setDoctors] = useState<any[]>([]);
+interface VerifyUsersScreenProps {
+  role?: 'doctor' | 'admin';
+  title?: string;
+  subtitle?: string;
+  emptyTitle?: string;
+  emptyMessage?: string;
+  userType?: string;
+}
+
+export default function VerifyUsersScreen({
+  role = 'doctor',
+  title = 'Verify Doctors',
+  subtitle = 'doctors awaiting verification',
+  emptyTitle = 'No Pending Verifications',
+  emptyMessage = 'All doctors have been verified.',
+  userType = 'doctor'
+}: VerifyUsersScreenProps) {
+  const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
 
-  const loadPendingDoctors = async () => {
+  const loadPendingUsers = async () => {
     setLoading(true);
-    console.log('🔄 Loading pending doctors...');
+    console.log(`🔄 Loading pending ${userType}s...`);
 
     try {
-      // Get unverified doctors only
-      const { data: unverifiedDoctors, error } = await supabase
+      // Get unverified users based on role
+      const { data: unverifiedUsers, error } = await supabase
         .from('users')
         .select('id, full_name, email, is_verified, role, created_at, hospital_id')
-        .eq('role', 'doctor')
+        .eq('role', role)
         .eq('is_verified', false)
         .order('created_at', { ascending: true });
 
-      console.log('📊 Unverified doctors query result:', { unverifiedDoctors, error });
+      console.log(`📊 Unverified ${userType}s query result:`, { unverifiedUsers, error });
 
       if (error) {
         console.error('❌ Database error:', error);
-        Alert.alert('Error', 'Failed to load pending doctors');
-        setDoctors([]);
+        Alert.alert('Error', `Failed to load pending ${userType}s`);
+        setUsers([]);
         return;
       }
 
-      console.log(`🎯 Found ${unverifiedDoctors?.length || 0} unverified doctors`);
-      setDoctors(unverifiedDoctors || []);
+      console.log(`🎯 Found ${unverifiedUsers?.length || 0} unverified ${userType}s`);
+      setUsers(unverifiedUsers || []);
 
     } catch (catchError) {
       console.error('💥 Unexpected error:', catchError);
       Alert.alert('Error', 'An unexpected error occurred');
-      setDoctors([]);
+      setUsers([]);
     } finally {
       setLoading(false);
     }
@@ -47,41 +63,41 @@ export default function VerifyDoctorsScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadPendingDoctors();
+    await loadPendingUsers();
     setRefreshing(false);
   };
 
   useEffect(() => {
-    loadPendingDoctors();
-  }, []);
+    loadPendingUsers();
+  }, [role]);
 
-  // Function to verify doctor
-  const verifyDoctor = async (doctor: any) => {
-    setProcessingId(doctor.id);
+  // Function to verify user
+  const verifyUser = async (user: any) => {
+    setProcessingId(user.id);
     try {
       const { error } = await supabase
         .from('users')
         .update({ is_verified: true })
-        .eq('id', doctor.id);
+        .eq('id', user.id);
 
       if (error) {
         console.error('❌ Verification error:', error);
-        Alert.alert('Error', `Failed to verify doctor: ${error.message}`);
+        Alert.alert('Error', `Failed to verify ${userType}: ${error.message}`);
       } else {
-        console.log('✅ Doctor verified successfully:', doctor.email);
-        Alert.alert('Success', `${doctor.full_name} has been verified and can now access the system.`);
-        await loadPendingDoctors(); // Refresh the list
+        console.log(`✅ ${userType} verified successfully:`, user.email);
+        Alert.alert('Success', `${user.full_name} has been verified and can now access the system.`);
+        await loadPendingUsers(); // Refresh the list
       }
     } catch (error) {
       console.error('💥 Verification failed:', error);
-      Alert.alert('Error', 'Failed to verify doctor');
+      Alert.alert('Error', `Failed to verify ${userType}`);
     } finally {
       setProcessingId(null);
     }
   };
 
   const handleRefresh = () => {
-    loadPendingDoctors();
+    loadPendingUsers();
   };
 
   const renderItem = ({ item }: any) => {
@@ -89,7 +105,7 @@ export default function VerifyDoctorsScreen() {
 
     return (
       <View style={styles.item}>
-        <View style={styles.doctorInfo}>
+        <View style={styles.userInfo}>
           <Text style={styles.name}>{item.full_name}</Text>
           <Text style={styles.email}>{item.email}</Text>
           <Text style={styles.hospital}>Hospital ID: {item.hospital_id}</Text>
@@ -105,7 +121,7 @@ export default function VerifyDoctorsScreen() {
         <View style={styles.actions}>
           <TouchableOpacity 
             style={[styles.verifyButton, isProcessing && styles.buttonDisabled]}
-            onPress={() => verifyDoctor(item)}
+            onPress={() => verifyUser(item)}
             disabled={isProcessing}
           >
             {isProcessing ? (
@@ -131,12 +147,11 @@ export default function VerifyDoctorsScreen() {
     );
   }
 
-  if (doctors.length === 0) {
+  if (users.length === 0) {
     return (
       <EmptyState
-        title="No Pending Verifications"
-        message="All doctors have been verified. There are no pending verification requests at the moment."
-
+        title={emptyTitle}
+        message={emptyMessage}
         actionText="Refresh"
         onAction={handleRefresh}
         icon="checkmark-done-outline"
@@ -147,18 +162,18 @@ export default function VerifyDoctorsScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Verify Doctors</Text>
+        <Text style={styles.title}>{title}</Text>
         <Text style={styles.subtitle}>
-          {doctors.length} doctor{doctors.length !== 1 ? 's' : ''} awaiting verification
+          {users.length} {userType}{users.length !== 1 ? 's' : ''} awaiting verification
         </Text>
         <Text style={styles.instructions}>
-          Verify doctors to grant them access to the system
+          Verify {userType}s to grant them access to the system
         </Text>
       </View>
       
       <FlatList
-        data={doctors}
-        keyExtractor={(doctor) => doctor.id}
+        data={users}
+        keyExtractor={(user) => user.id}
         renderItem={renderItem}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
@@ -220,7 +235,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3,
   },
-  doctorInfo: {
+  userInfo: {
     flex: 1,
     marginRight: 12,
   },

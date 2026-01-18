@@ -20,7 +20,7 @@ export interface UserProfile {
   name: string;
   email?: string;
   phone?: string;
-  profilePicture?: string; // Add this line
+  profilePicture?: string|null; // Add this line
   preferences: UserPreferences;
   createdAt: string;
   updatedAt: string;
